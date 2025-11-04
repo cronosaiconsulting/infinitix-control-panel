@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinitix - Control Panel</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="logo">
+                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <circle cx="16" cy="16" r="15" stroke="#4f46e5" stroke-width="2"/>
+                        <path d="M16 8 L16 24 M10 16 L22 16" stroke="#4f46e5" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <h1>Infinitix Control Panel</h1>
+                </div>
+                <div class="header-info">
+                    <span class="company-name">OCC Sport Plus</span>
+                    <span class="connection-status" id="connectionStatus">
+                        <span class="status-dot"></span>
+                        Conectando...
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Demo Start Screen -->
+        <div class="demo-start-screen" id="demoStartScreen">
+            <div class="demo-start-content">
+                <div class="demo-icon">
+                    <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+                        <circle cx="40" cy="40" r="38" stroke="#4f46e5" stroke-width="4"/>
+                        <path d="M30 25 L30 55 L55 40 Z" fill="#4f46e5"/>
+                    </svg>
+                </div>
+                <h2>Bienvenido al Panel de Control de Infinitix</h2>
+                <p>Sistema de gestión de conversaciones de WhatsApp en tiempo real</p>
+                <p class="demo-description">
+                    Este demo simula un sistema de atención al cliente donde Infinitix,
+                    nuestro asistente de IA, gestiona múltiples conversaciones simultáneas
+                    con clientes de OCC Sport Plus, empresa especializada en accesorios para automóviles.
+                </p>
+                <button class="start-demo-btn" id="startDemoBtn">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                        <path d="M8 5 L8 19 L19 12 Z" fill="white"/>
+                    </svg>
+                    INICIAR DEMO
+                </button>
+                <div class="demo-stats">
+                    <div class="stat-item">
+                        <span class="stat-number">10</span>
+                        <span class="stat-label">Conversaciones</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">~100</span>
+                        <span class="stat-label">Mensajes</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">5</span>
+                        <span class="stat-label">Minutos</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content" id="mainContent" style="display: none;">
+            <!-- Sidebar - Conversation List -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2>Conversaciones</h2>
+                    <button class="stop-demo-btn" id="stopDemoBtn">Detener Demo</button>
+                </div>
+                <div class="demo-progress" id="demoProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p class="progress-text" id="progressText">Cargando conversaciones...</p>
+                </div>
+                <div class="conversation-list" id="conversationList">
+                    <div class="empty-state">
+                        <p>No hay conversaciones activas</p>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Main Chat Area -->
+            <main class="chat-area">
+                <div class="chat-empty" id="chatEmpty">
+                    <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                        <rect x="8" y="12" width="48" height="36" rx="4" stroke="#cbd5e1" stroke-width="2"/>
+                        <path d="M18 24 L46 24 M18 32 L38 32 M18 40 L42 40" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <p>Selecciona una conversación para ver los mensajes</p>
+                </div>
+
+                <div class="chat-active" id="chatActive" style="display: none;">
+                    <div class="chat-header" id="chatHeader">
+                        <div class="chat-user-info">
+                            <div class="user-avatar">
+                                <span id="userInitial">?</span>
+                            </div>
+                            <div class="user-details">
+                                <h3 id="userName">Usuario</h3>
+                                <span id="userId" class="user-id">ID: --</span>
+                            </div>
+                        </div>
+                        <div class="chat-actions">
+                            <button class="action-btn" title="Información">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM9 9h2v6H9V9zm0-4h2v2H9V5z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="chat-messages" id="chatMessages">
+                        <!-- Messages will be inserted here -->
+                    </div>
+
+                    <div class="chat-input">
+                        <input type="text" placeholder="Escribe un mensaje (solo lectura en modo demo)..." disabled>
+                        <button disabled>
+                            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                <path d="M2 3l16 7-16 7V3z"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
