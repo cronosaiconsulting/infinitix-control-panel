@@ -285,6 +285,11 @@ app.get('/', (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 
+console.log('🚀 Starting Infinitix Control Panel...');
+console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`🔌 PORT from env: ${process.env.PORT || 'not set (using default 3000)'}`);
+console.log(`🌐 Binding to: 0.0.0.0:${PORT}`);
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
@@ -292,11 +297,22 @@ server.listen(PORT, '0.0.0.0', () => {
 ║      INFINITIX CHATBOT CONTROL PANEL                      ║
 ║      WhatsApp Conversation Management System               ║
 ║                                                           ║
-║      Server running on: http://localhost:${PORT}          ║
-║      WebSocket ready for real-time updates                ║
+║      ✅ Server running on: 0.0.0.0:${PORT}                 ║
+║      ✅ WebSocket ready for real-time updates              ║
+║      ✅ Health check: http://localhost:${PORT}/health      ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
   `);
+  console.log('✨ Server started successfully!');
+});
+
+// Log any server errors
+server.on('error', (error) => {
+  console.error('❌ Server error:', error);
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use!`);
+  }
+  process.exit(1);
 });
 
 // Graceful shutdown
