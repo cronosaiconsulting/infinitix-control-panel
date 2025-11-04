@@ -2,6 +2,8 @@
 
 Real-time WhatsApp conversation management system for Infinitix AI Chatbot.
 
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https%3A%2F%2Fgithub.com%2Fcronosaiconsulting%2Finfinitix-control-panel&envs=NODE_ENV&NODE_ENVDefault=production)
+
 ## 🚀 Features
 
 - **Real-time Dashboard**: Monitor all conversations in real-time using WebSockets
