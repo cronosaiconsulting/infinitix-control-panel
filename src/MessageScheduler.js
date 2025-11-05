@@ -7,6 +7,10 @@ class MessageScheduler {
     this.sendWebhook = sendWebhookFn; // Function to send webhook
     this.broadcast = broadcastFn; // Function to broadcast progress
 
+    // Seeded random number generator for reproducible randomness
+    this.seed = Date.now(); // Use current timestamp as seed
+    console.log(`🎲 Demo seed: ${this.seed}`);
+
     // State tracking
     this.conversationStates = new Map(); // convId -> { currentIndex, lastMessageTime, nextSender }
     this.openConversations = new Set(); // Conversations that are active (started but not ended)
@@ -24,6 +28,25 @@ class MessageScheduler {
     // Statistics
     this.totalMessages = 0;
     this.sentMessages = 0;
+
+    // Shuffle conversations based on seed for different order each time
+    this.shuffleConversations();
+  }
+
+  // Seeded random number generator (Linear Congruential Generator)
+  seededRandom() {
+    this.seed = (this.seed * 9301 + 49297) % 233280;
+    return this.seed / 233280;
+  }
+
+  // Shuffle array using seeded random
+  shuffleConversations() {
+    const array = this.conversations;
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(this.seededRandom() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    console.log('📋 Conversation order:', this.conversations.map(c => c.userName).join(', '));
   }
 
   start() {
@@ -33,14 +56,16 @@ class MessageScheduler {
     // Count total messages
     this.totalMessages = this.conversations.reduce((sum, conv) => sum + conv.messages.length, 0);
 
+    console.log(`▶️ Starting demo with ${this.totalMessages} total messages`);
+
     // Send first message from first conversation IMMEDIATELY
     const firstConv = this.conversations[0];
     const firstMsg = firstConv.messages[0];
 
     this.sendMessageNow(firstConv, 0, now);
 
-    // Start the scheduler
-    this.scheduleNextBatch();
+    // Fill the queue for the next 5 seconds
+    this.fill_queue();
   }
 
   stop() {
@@ -132,7 +157,9 @@ class MessageScheduler {
     }
   }
 
-  scheduleNextBatch() {
+  // Fill queue with messages for the next 5 seconds
+  // This function is called after each message is sent to maintain the queue
+  fill_queue() {
     if (!this.isRunning) return;
 
     const now = Date.now();
@@ -141,15 +168,26 @@ class MessageScheduler {
     this.messageQueue = this.messageQueue.filter(msg => msg.scheduledTime > now);
 
     // Calculate how far our queue extends
-    const queueEndTime = this.messageQueue.length > 0 ?
+    let queueEndTime = this.messageQueue.length > 0 ?
       Math.max(...this.messageQueue.map(m => m.scheduledTime)) : now;
 
-    // Fill queue until it extends 5 seconds ahead
+    const extendSeconds = Math.round((queueEndTime - now) / 1000);
+    console.log(`🔄 Filling queue (current: ${this.messageQueue.length} messages, extends ${extendSeconds}s ahead)`);
+
+    // Fill queue until it extends at least 5 seconds ahead
+    let attempts = 0;
     while (queueEndTime - now < this.QUEUE_WINDOW && this.isRunning) {
+      attempts++;
+      if (attempts > 100) {
+        console.log('⚠️ Max attempts reached in fill_queue');
+        break; // Safety limit
+      }
+
       // Find next available message slot
-      const nextSlot = this.findNextAvailableSlot(now);
+      const nextSlot = this.findNextAvailableSlot(Math.max(now, queueEndTime));
 
       if (!nextSlot) {
+        console.log('✋ No more message slots available');
         break; // No more messages available
       }
 
@@ -157,11 +195,12 @@ class MessageScheduler {
       const pick = this.pickNextConversation(nextSlot.time);
 
       if (!pick) {
+        console.log('✋ No conversations ready');
         break; // No conversations ready
       }
 
-      // Add random delay (0-2000ms)
-      const randomDelay = Math.floor(Math.random() * this.RANDOM_DELAY_MAX);
+      // Add random delay (0-2000ms) using seeded random
+      const randomDelay = Math.floor(this.seededRandom() * this.RANDOM_DELAY_MAX);
       const scheduledTime = nextSlot.time + randomDelay;
 
       // Add to queue
@@ -171,11 +210,14 @@ class MessageScheduler {
         scheduledTime: scheduledTime
       });
 
+      console.log(`📤 Queued: ${pick.conversation.userName} msg ${pick.messageIndex + 1} at +${Math.round((scheduledTime - now) / 1000)}s`);
+
       // Schedule the actual sending
       const delay = scheduledTime - now;
       const timerId = setTimeout(() => {
         this.sendMessageNow(pick.conversation, pick.messageIndex, scheduledTime);
-        this.scheduleNextBatch(); // Refill queue after sending
+        // Refill queue after sending to maintain 5-second window
+        this.fill_queue();
       }, delay);
 
       this.queueTimers.push(timerId);
@@ -185,7 +227,12 @@ class MessageScheduler {
       if (state) {
         state.currentIndex++; // Increment so we don't pick same message again
       }
+
+      // Update queueEndTime for next iteration
+      queueEndTime = Math.max(...this.messageQueue.map(m => m.scheduledTime));
     }
+
+    console.log(`✅ Queue filled: ${this.messageQueue.length} messages queued, extends to +${Math.round((queueEndTime - now) / 1000)}s`);
   }
 
   findNextAvailableSlot(fromTime) {
