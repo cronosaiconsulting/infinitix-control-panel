@@ -205,6 +205,17 @@ class MessageScheduler {
       const randomDelay = Math.floor(this.seededRandom() * this.RANDOM_DELAY_MAX);
       const scheduledTime = nextSlot.time + randomDelay;
 
+      // Check if this exact message is already in the queue
+      const alreadyQueued = this.messageQueue.some(msg =>
+        msg.conversation.userId === pick.conversation.userId &&
+        msg.messageIndex === pick.messageIndex
+      );
+
+      if (alreadyQueued) {
+        console.log(`⚠️ Message already queued: ${pick.conversation.userName} msg ${pick.messageIndex + 1}, skipping`);
+        continue; // Skip this duplicate and try to find another message to queue
+      }
+
       // Add to queue
       this.messageQueue.push({
         conversation: pick.conversation,
