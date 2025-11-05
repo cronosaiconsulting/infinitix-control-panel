@@ -410,24 +410,14 @@ class InfinitixControlPanel {
 
     playNotificationSound() {
         try {
-            // Create simple notification beep using Web Audio API
-            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-
-            // Configure beep (short, pleasant tone)
-            oscillator.frequency.value = 800;
-            oscillator.type = 'sine';
-            gainNode.gain.value = 0.1;
-
-            // Play short beep
-            oscillator.start(audioContext.currentTime);
-            oscillator.stop(audioContext.currentTime + 0.1);
+            // Use MP3 notification sound
+            const audio = new Audio('/new-notification-010-352755.mp3');
+            audio.volume = 0.3; // Set volume to 30%
+            audio.play().catch(e => {
+                console.log('Audio playback failed:', e.message);
+            });
         } catch (e) {
-            // Silently fail if audio context not supported
+            // Silently fail if audio not supported
             console.log('Audio not supported:', e.message);
         }
     }

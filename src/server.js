@@ -4,7 +4,8 @@ const WebSocket = require('ws');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const path = require('path');
-const { generateDemoData, generateWebhookCalls } = require('./demoData');
+const { generateDemoData } = require('./demoData');
+const MessageScheduler = require('./MessageScheduler');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,7 +20,7 @@ const conversations = new Map();
 const contacts = new Map();
 let clients = new Set();
 let demoRunning = false;
-let demoTimeouts = [];
+let messageScheduler = null;
 
 // Add default bot contact
 contacts.set('0', { user_id: '0', name: 'Infinitix' });
@@ -131,7 +132,7 @@ app.post('/api/start-demo', async (req, res) => {
     return res.json({ success: false, message: 'Demo already running' });
   }
 
-  console.log('Starting demo simulation...');
+  console.log('Starting dynamic demo simulation...');
   demoRunning = true;
 
   // Clear existing data
@@ -145,85 +146,48 @@ app.post('/api/start-demo', async (req, res) => {
     data: {}
   });
 
-  // Generate demo data
+  // Generate demo conversations
   const demoConversations = generateDemoData();
-  const webhookCalls = generateWebhookCalls(demoConversations);
+  console.log(`Loaded ${demoConversations.length} demo conversations`);
 
-  console.log(`Generated ${webhookCalls.length} webhook calls`);
-
-  // Use localhost for self-calls (more reliable than going through proxy)
+  // Create webhook sender function
   const PORT = process.env.PORT || 3000;
   const webhookUrl = `http://localhost:${PORT}/webhook`;
-  console.log(`Using webhook URL: ${webhookUrl}`);
 
-  // Schedule all webhook calls
-  const startTime = Date.now();
+  const sendWebhookFn = async (webhookData) => {
+    try {
+      await axios.post(webhookUrl, webhookData);
+    } catch (error) {
+      console.error('Error sending webhook:', error.message);
+    }
+  };
+
+  // Create message scheduler
+  messageScheduler = new MessageScheduler(demoConversations, sendWebhookFn, broadcast);
+
+  // Calculate total messages for response
+  const totalMessages = demoConversations.reduce((sum, conv) => sum + conv.messages.length, 0);
 
   res.json({
     success: true,
-    message: 'Demo started',
-    totalMessages: webhookCalls.length,
-    duration: webhookCalls[webhookCalls.length - 1].timestamp
+    message: 'Demo started with intelligent scheduling',
+    totalMessages: totalMessages,
+    conversations: demoConversations.length
   });
 
-  // Send webhook calls with timing
-  let completedCalls = 0;
-
-  webhookCalls.forEach((call, index) => {
-    const delay = call.timestamp * 1000; // Convert to milliseconds
-
-    const timeoutId = setTimeout(async () => {
-      // Check if demo was stopped
-      if (!demoRunning) return;
-
-      try {
-        await axios.post(webhookUrl, {
-          type: call.type,
-          data: call.data
-        });
-
-        completedCalls++;
-
-        // Broadcast progress
-        broadcast({
-          type: 'demo_progress',
-          data: {
-            completed: completedCalls,
-            total: webhookCalls.length,
-            percentage: Math.floor((completedCalls / webhookCalls.length) * 100)
-          }
-        });
-
-        if (completedCalls === webhookCalls.length) {
-          console.log('Demo simulation completed');
-          demoRunning = false;
-          demoTimeouts = [];
-
-          broadcast({
-            type: 'demo_complete',
-            data: {
-              message: 'Demo simulation completed!',
-              totalConversations: conversations.size,
-              totalMessages: completedCalls
-            }
-          });
-        }
-      } catch (error) {
-        console.error('Error sending webhook:', error.message);
-      }
-    }, delay);
-
-    demoTimeouts.push(timeoutId);
-  });
+  // Start the scheduler (first message sent immediately)
+  messageScheduler.start();
 });
 
 // Stop demo endpoint
 app.post('/api/stop-demo', (req, res) => {
-  console.log(`Stopping demo... clearing ${demoTimeouts.length} pending timeouts`);
+  console.log('Stopping demo...');
 
-  // Clear all pending timeouts
-  demoTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
-  demoTimeouts = [];
+  // Stop the message scheduler
+  if (messageScheduler) {
+    messageScheduler.stop();
+    messageScheduler = null;
+  }
 
   demoRunning = false;
 
