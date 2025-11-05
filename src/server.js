@@ -151,10 +151,10 @@ app.post('/api/start-demo', async (req, res) => {
 
   console.log(`Generated ${webhookCalls.length} webhook calls`);
 
-  // Get server URL
-  const protocol = req.protocol;
-  const host = req.get('host');
-  const webhookUrl = `${protocol}://${host}/webhook`;
+  // Use localhost for self-calls (more reliable than going through proxy)
+  const PORT = process.env.PORT || 3000;
+  const webhookUrl = `http://localhost:${PORT}/webhook`;
+  console.log(`Using webhook URL: ${webhookUrl}`);
 
   // Schedule all webhook calls
   const startTime = Date.now();
