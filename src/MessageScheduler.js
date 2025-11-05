@@ -164,8 +164,10 @@ class MessageScheduler {
 
     const now = Date.now();
 
-    // Remove already-sent messages from queue
-    this.messageQueue = this.messageQueue.filter(msg => msg.scheduledTime > now);
+    // IMPORTANT: Don't remove messages from queue based on time alone!
+    // The setTimeout might not have fired yet, causing duplicates.
+    // Only remove messages that are old enough that setTimeout definitely fired (500ms buffer)
+    this.messageQueue = this.messageQueue.filter(msg => msg.scheduledTime > now - 500);
 
     // Calculate how far our queue extends
     let queueEndTime = this.messageQueue.length > 0 ?
@@ -215,6 +217,11 @@ class MessageScheduler {
       // Schedule the actual sending
       const delay = scheduledTime - now;
       const timerId = setTimeout(() => {
+        // Remove this specific message from queue when it's sent
+        this.messageQueue = this.messageQueue.filter(msg =>
+          !(msg.conversation.userId === pick.conversation.userId && msg.messageIndex === pick.messageIndex)
+        );
+
         this.sendMessageNow(pick.conversation, pick.messageIndex, scheduledTime);
         // Refill queue after sending to maintain 5-second window
         this.fill_queue();
