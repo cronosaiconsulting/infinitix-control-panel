@@ -222,12 +222,6 @@ class MessageScheduler {
 
       this.queueTimers.push(timerId);
 
-      // Temporarily mark this conversation as used (for this iteration)
-      const state = this.conversationStates.get(pick.conversation.userId);
-      if (state) {
-        state.currentIndex++; // Increment so we don't pick same message again
-      }
-
       // Update queueEndTime for next iteration
       queueEndTime = Math.max(...this.messageQueue.map(m => m.scheduledTime));
     }
@@ -278,6 +272,21 @@ class MessageScheduler {
         continue;
       }
 
+      // Find what message index we should send next (considering what's already queued)
+      const queuedIndicesForConv = this.messageQueue
+        .filter(msg => msg.conversation.userId === convId)
+        .map(msg => msg.messageIndex);
+
+      // The next index to send is the highest queued index + 1, or currentIndex if nothing queued
+      const nextIndexToQueue = queuedIndicesForConv.length > 0
+        ? Math.max(...queuedIndicesForConv) + 1
+        : state.currentIndex;
+
+      // Check if we've run out of messages
+      if (nextIndexToQueue >= conv.messages.length) {
+        continue;
+      }
+
       // Find the latest message time for this conversation (including queued messages)
       const queuedMessagesForConv = this.messageQueue
         .filter(msg => msg.conversation.userId === convId)
@@ -307,7 +316,7 @@ class MessageScheduler {
       if (timeSinceLastMessage >= cooldown) {
         openCandidates.push({
           conversation: conv,
-          messageIndex: state.currentIndex,
+          messageIndex: nextIndexToQueue,
           priority: timeSinceLastMessage // Higher priority for longer waits
         });
       }
