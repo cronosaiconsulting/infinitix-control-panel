@@ -355,33 +355,37 @@ function generateWebhookCalls(conversations) {
   // Sort by timestamp
   webhookCalls.sort((a, b) => a.timestamp - b.timestamp);
 
-  // Redistribute timing to ensure max 3 messages per 5 seconds
+  // Ensure max 3 messages per 5-second window while keeping natural flow
   const redistributedCalls = [];
-  let currentTime = 0;
-  let messagesInWindow = 0;
-  let windowStart = 0;
+  const messagesByWindow = new Map(); // window start -> count
 
-  webhookCalls.forEach((call, index) => {
-    // Check if we're in a new 5-second window
-    if (currentTime - windowStart >= 5) {
-      windowStart = currentTime;
-      messagesInWindow = 0;
+  webhookCalls.forEach((call) => {
+    let targetTime = call.timestamp;
+
+    // Find which 5-second window this falls into
+    let windowStart = Math.floor(targetTime / 5) * 5;
+
+    // Check how many messages are already in this window
+    let messagesInWindow = messagesByWindow.get(windowStart) || 0;
+
+    // If window is full (3 messages), find next available window
+    while (messagesInWindow >= 3) {
+      windowStart += 5;
+      messagesInWindow = messagesByWindow.get(windowStart) || 0;
     }
 
-    // If we've hit 3 messages in this window, move to next window
-    if (messagesInWindow >= 3) {
-      currentTime = windowStart + 5;
-      windowStart = currentTime;
-      messagesInWindow = 0;
-    }
+    // Calculate new timestamp within the window to maintain order
+    // Spread messages evenly: 0s, 1.5s, 3s within each 5s window
+    const offset = messagesInWindow * 1.5;
+    targetTime = windowStart + offset;
 
     redistributedCalls.push({
       ...call,
-      timestamp: currentTime
+      timestamp: targetTime
     });
 
-    messagesInWindow++;
-    currentTime += 0.5; // Small increment to preserve order
+    // Update count for this window
+    messagesByWindow.set(windowStart, messagesInWindow + 1);
   });
 
   return redistributedCalls;
