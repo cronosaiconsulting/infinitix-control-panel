@@ -269,6 +269,7 @@ body {
 .conversation-list {
     flex: 1;
     overflow-y: auto;
+    scroll-behavior: smooth;
 }
 
 .conversation-item {
@@ -435,6 +436,8 @@ body {
     display: flex;
     flex-direction: column;
     gap: 1rem;
+    background: #f7f7f7;
+    scroll-behavior: smooth;
 }
 
 .message {
@@ -478,7 +481,7 @@ body {
 }
 
 .message.bot .message-avatar {
-    background: var(--primary-color);
+    background: #2563eb;
 }
 
 .message.user .message-avatar {
@@ -497,26 +500,47 @@ body {
 }
 
 .message.bot .message-bubble {
-    background: var(--surface-color);
-    border: 1px solid var(--border-color);
+    background: #2563eb;
+    color: white;
     border-bottom-left-radius: 0.25rem;
 }
 
 .message.user .message-bubble {
-    background: var(--primary-color);
-    color: white;
+    background: var(--surface-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
     border-bottom-right-radius: 0.25rem;
+}
+
+.message-sender {
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    padding: 0 0.25rem;
+}
+
+.message.bot .message-sender {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.message.user .message-sender {
+    color: var(--text-secondary);
+    text-align: right;
 }
 
 .message-time {
     font-size: 0.75rem;
-    color: var(--text-light);
     margin-top: 0.25rem;
     padding: 0 0.25rem;
 }
 
+.message.bot .message-time {
+    color: rgba(255, 255, 255, 0.7);
+}
+
 .message.user .message-time {
     text-align: right;
+    color: var(--text-light);
 }
 
 .chat-input {

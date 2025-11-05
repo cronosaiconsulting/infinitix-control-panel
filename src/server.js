@@ -19,7 +19,7 @@ const conversations = new Map();
 const contacts = new Map();
 let clients = new Set();
 let demoRunning = false;
-let demoTimeout = null;
+let demoTimeouts = [];
 
 // Add default bot contact
 contacts.set('0', { user_id: '0', name: 'Infinitix' });
@@ -172,7 +172,10 @@ app.post('/api/start-demo', async (req, res) => {
   webhookCalls.forEach((call, index) => {
     const delay = call.timestamp * 1000; // Convert to milliseconds
 
-    demoTimeout = setTimeout(async () => {
+    const timeoutId = setTimeout(async () => {
+      // Check if demo was stopped
+      if (!demoRunning) return;
+
       try {
         await axios.post(webhookUrl, {
           type: call.type,
@@ -194,6 +197,7 @@ app.post('/api/start-demo', async (req, res) => {
         if (completedCalls === webhookCalls.length) {
           console.log('Demo simulation completed');
           demoRunning = false;
+          demoTimeouts = [];
 
           broadcast({
             type: 'demo_complete',
@@ -208,15 +212,18 @@ app.post('/api/start-demo', async (req, res) => {
         console.error('Error sending webhook:', error.message);
       }
     }, delay);
+
+    demoTimeouts.push(timeoutId);
   });
 });
 
 // Stop demo endpoint
 app.post('/api/stop-demo', (req, res) => {
-  if (demoTimeout) {
-    clearTimeout(demoTimeout);
-    demoTimeout = null;
-  }
+  console.log(`Stopping demo... clearing ${demoTimeouts.length} pending timeouts`);
+
+  // Clear all pending timeouts
+  demoTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+  demoTimeouts = [];
 
   demoRunning = false;
 

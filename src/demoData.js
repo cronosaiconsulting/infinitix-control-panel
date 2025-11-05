@@ -42,8 +42,8 @@ const generateMessageTime = (baseTime, messageIndex, isBot, personality) => {
   let delay;
 
   if (messageIndex === 0) {
-    // First message: spread over 5 minutes (300 seconds)
-    delay = Math.floor(Math.random() * 300);
+    // First message: instant (0-2 seconds)
+    delay = Math.floor(Math.random() * 2);
   } else if (isBot) {
     // Bot responses: 3-6 seconds
     delay = 3 + Math.floor(Math.random() * 3);
@@ -355,7 +355,36 @@ function generateWebhookCalls(conversations) {
   // Sort by timestamp
   webhookCalls.sort((a, b) => a.timestamp - b.timestamp);
 
-  return webhookCalls;
+  // Redistribute timing to ensure max 3 messages per 5 seconds
+  const redistributedCalls = [];
+  let currentTime = 0;
+  let messagesInWindow = 0;
+  let windowStart = 0;
+
+  webhookCalls.forEach((call, index) => {
+    // Check if we're in a new 5-second window
+    if (currentTime - windowStart >= 5) {
+      windowStart = currentTime;
+      messagesInWindow = 0;
+    }
+
+    // If we've hit 3 messages in this window, move to next window
+    if (messagesInWindow >= 3) {
+      currentTime = windowStart + 5;
+      windowStart = currentTime;
+      messagesInWindow = 0;
+    }
+
+    redistributedCalls.push({
+      ...call,
+      timestamp: currentTime
+    });
+
+    messagesInWindow++;
+    currentTime += 0.5; // Small increment to preserve order
+  });
+
+  return redistributedCalls;
 }
 
 module.exports = {

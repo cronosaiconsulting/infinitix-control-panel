@@ -328,8 +328,19 @@ class InfinitixControlPanel {
         const chatMessages = document.getElementById('chatMessages');
         if (!chatMessages) return;
 
+        // Check if scrolled to bottom before adding message
+        const isScrolledToBottom = chatMessages.scrollHeight - chatMessages.clientHeight <= chatMessages.scrollTop + 50;
+
         const messageHTML = this.createMessageHTML(message);
         chatMessages.insertAdjacentHTML('beforeend', messageHTML);
+
+        // Auto-scroll if was at bottom
+        if (isScrolledToBottom) {
+            this.scrollToBottom();
+        }
+
+        // Play sound
+        this.playNotificationSound();
     }
 
     createMessageHTML(message) {
@@ -342,6 +353,7 @@ class InfinitixControlPanel {
             <div class="message ${isBot ? 'bot' : 'user'}">
                 <div class="message-avatar">${initial}</div>
                 <div class="message-content">
+                    <div class="message-sender">${this.escapeHtml(contact.name)}</div>
                     <div class="message-bubble">${this.escapeHtml(message.message).replace(/\n/g, '<br>')}</div>
                     <div class="message-time">${time}</div>
                 </div>
@@ -397,9 +409,27 @@ class InfinitixControlPanel {
     }
 
     playNotificationSound() {
-        // Optional: Add notification sound
-        // const audio = new Audio('/notification.mp3');
-        // audio.play().catch(e => console.log('Could not play sound:', e));
+        try {
+            // Create simple notification beep using Web Audio API
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // Configure beep (short, pleasant tone)
+            oscillator.frequency.value = 800;
+            oscillator.type = 'sine';
+            gainNode.gain.value = 0.1;
+
+            // Play short beep
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.1);
+        } catch (e) {
+            // Silently fail if audio context not supported
+            console.log('Audio not supported:', e.message);
+        }
     }
 }
 
