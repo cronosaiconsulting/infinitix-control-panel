@@ -278,9 +278,31 @@ class MessageScheduler {
         continue;
       }
 
-      // Check cooldown
-      const cooldown = state.lastSender === 'bot' ? this.COOLDOWN_BOT : this.COOLDOWN_USER;
-      const timeSinceLastMessage = currentTime - state.lastMessageTime;
+      // Find the latest message time for this conversation (including queued messages)
+      const queuedMessagesForConv = this.messageQueue
+        .filter(msg => msg.conversation.userId === convId)
+        .map(msg => msg.scheduledTime);
+
+      const latestMessageTime = queuedMessagesForConv.length > 0
+        ? Math.max(state.lastMessageTime, ...queuedMessagesForConv)
+        : state.lastMessageTime;
+
+      // Determine cooldown based on the last sender in this conversation
+      // If there are queued messages, check the sender of the most recent one
+      let lastSender = state.lastSender;
+      if (queuedMessagesForConv.length > 0) {
+        // Find the most recent queued message for this conversation
+        const latestQueued = this.messageQueue
+          .filter(msg => msg.conversation.userId === convId)
+          .sort((a, b) => b.scheduledTime - a.scheduledTime)[0];
+
+        if (latestQueued && latestQueued.scheduledTime > state.lastMessageTime) {
+          lastSender = latestQueued.conversation.messages[latestQueued.messageIndex].sender;
+        }
+      }
+
+      const cooldown = lastSender === 'bot' ? this.COOLDOWN_BOT : this.COOLDOWN_USER;
+      const timeSinceLastMessage = currentTime - latestMessageTime;
 
       if (timeSinceLastMessage >= cooldown) {
         openCandidates.push({

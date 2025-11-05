@@ -128,8 +128,11 @@ app.post('/webhook', (req, res) => {
 
 // Start demo endpoint
 app.post('/api/start-demo', async (req, res) => {
-  if (demoRunning) {
-    return res.json({ success: false, message: 'Demo already running' });
+  // If demo is already running, stop it first
+  if (demoRunning && messageScheduler) {
+    console.log('Demo already running, stopping it first...');
+    messageScheduler.stop();
+    messageScheduler = null;
   }
 
   console.log('Starting dynamic demo simulation...');
