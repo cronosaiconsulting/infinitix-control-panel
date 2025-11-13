@@ -12,7 +12,6 @@ class InfinitixControlPanel {
     init() {
         this.setupWebSocket();
         this.setupEventListeners();
-        this.showDemoStartScreen();
     }
 
     setupWebSocket() {
@@ -58,18 +57,6 @@ class InfinitixControlPanel {
                 break;
             case 'conversation_read':
                 this.handleConversationRead(message.data);
-                break;
-            case 'demo_progress':
-                this.handleDemoProgress(message.data);
-                break;
-            case 'demo_complete':
-                this.handleDemoComplete(message.data);
-                break;
-            case 'demo_stopped':
-                this.handleDemoStopped(message.data);
-                break;
-            case 'reset':
-                this.handleReset();
                 break;
         }
     }
@@ -124,106 +111,8 @@ class InfinitixControlPanel {
         }
     }
 
-    handleDemoProgress(data) {
-        const progressFill = document.getElementById('progressFill');
-        const progressText = document.getElementById('progressText');
-
-        if (progressFill && progressText) {
-            progressFill.style.width = `${data.percentage}%`;
-            progressText.textContent = `${data.completed} / ${data.total} mensajes enviados (${data.percentage}%)`;
-        }
-    }
-
-    handleDemoComplete(data) {
-        const progressText = document.getElementById('progressText');
-        if (progressText) {
-            progressText.textContent = `✓ Demo completado! ${data.totalConversations} conversaciones activas`;
-        }
-
-        setTimeout(() => {
-            const demoProgress = document.getElementById('demoProgress');
-            if (demoProgress) {
-                demoProgress.style.display = 'none';
-            }
-        }, 3000);
-    }
-
-    handleDemoStopped(data) {
-        const demoProgress = document.getElementById('demoProgress');
-        if (demoProgress) {
-            demoProgress.style.display = 'none';
-        }
-        alert(data.message);
-    }
-
-    handleReset() {
-        this.conversations.clear();
-        this.contacts.clear();
-        this.contacts.set('0', { user_id: '0', name: 'Infinitix' });
-        this.currentConversationId = null;
-        this.renderConversations();
-        this.showChatEmpty();
-    }
-
     setupEventListeners() {
-        const startDemoBtn = document.getElementById('startDemoBtn');
-        if (startDemoBtn) {
-            startDemoBtn.addEventListener('click', () => this.startDemo());
-        }
-
-        const stopDemoBtn = document.getElementById('stopDemoBtn');
-        if (stopDemoBtn) {
-            stopDemoBtn.addEventListener('click', () => this.stopDemo());
-        }
-    }
-
-    async startDemo() {
-        try {
-            const response = await fetch('/api/start-demo', { method: 'POST' });
-            const data = await response.json();
-
-            if (data.success) {
-                this.showMainContent();
-                this.showDemoProgress();
-            } else {
-                alert(data.message);
-            }
-        } catch (error) {
-            console.error('Error starting demo:', error);
-            alert('Error al iniciar el demo');
-        }
-    }
-
-    async stopDemo() {
-        if (confirm('¿Estás seguro de que quieres detener el demo?')) {
-            try {
-                const response = await fetch('/api/stop-demo', { method: 'POST' });
-                const data = await response.json();
-
-                if (data.success) {
-                    console.log('Demo stopped');
-                }
-            } catch (error) {
-                console.error('Error stopping demo:', error);
-            }
-        }
-    }
-
-    showDemoStartScreen() {
-        document.getElementById('demoStartScreen').style.display = 'flex';
-        document.getElementById('mainContent').style.display = 'none';
-    }
-
-    showMainContent() {
-        document.getElementById('demoStartScreen').style.display = 'none';
-        document.getElementById('mainContent').style.display = 'flex';
-    }
-
-    showDemoProgress() {
-        const demoProgress = document.getElementById('demoProgress');
-        if (demoProgress) {
-            demoProgress.style.display = 'block';
-        }
+        // Reserved for future event listeners
     }
 
     updateConnectionStatus(connected) {
@@ -253,19 +142,25 @@ class InfinitixControlPanel {
         }
 
         conversationList.innerHTML = sortedConversations.map(conv => {
-            const contact = this.contacts.get(conv.user_id) || { name: `Usuario ${conv.user_id}` };
+            // Use display_name from conversation (new logic), fallback to contact name
+            const displayName = conv.display_name || (this.contacts.get(conv.user_id) || { name: `Usuario ${conv.id}` }).name;
             const time = this.formatTime(conv.lastTimestamp);
             const isActive = this.currentConversationId === conv.id;
+
+            // Show session count if multiple sessions
+            const sessionInfo = conv.sessions && conv.sessions.length > 1 ?
+                `<span class="session-count">${conv.sessions.length} sesiones</span>` : '';
 
             return `
                 <div class="conversation-item ${isActive ? 'active' : ''}" data-id="${conv.id}">
                     <div class="conversation-header">
-                        <span class="conversation-name">${this.escapeHtml(contact.name)}</span>
+                        <span class="conversation-name">${this.escapeHtml(displayName)}</span>
                         <span class="conversation-time">${time}</span>
                     </div>
                     <div class="conversation-preview">${this.escapeHtml(conv.lastMessage || 'Nueva conversación')}</div>
                     <div class="conversation-footer">
-                        <span class="conversation-id">ID: ${conv.user_id}</span>
+                        <span class="conversation-id">ID: ${conv.id}</span>
+                        ${sessionInfo}
                         ${conv.unread > 0 ? `<span class="unread-badge">${conv.unread}</span>` : ''}
                     </div>
                 </div>
@@ -305,22 +200,54 @@ class InfinitixControlPanel {
     }
 
     renderChatHeader(conversation) {
-        const contact = this.contacts.get(conversation.user_id) || { name: `Usuario ${conversation.user_id}` };
-        const initial = contact.name.charAt(0).toUpperCase();
+        // Use display_name from conversation (new logic)
+        const displayName = conversation.display_name || (this.contacts.get(conversation.user_id) || { name: `Usuario ${conversation.id}` }).name;
+        const initial = displayName.charAt(0).toUpperCase();
 
         document.getElementById('userInitial').textContent = initial;
-        document.getElementById('userName').textContent = contact.name;
-        document.getElementById('userId').textContent = `ID: ${conversation.user_id}`;
+        document.getElementById('userName').textContent = displayName;
+
+        // Show user_id or session_id in subtitle
+        const subtitle = conversation.user_id ?
+            `Usuario: ${conversation.user_id}` :
+            `Conversación: ${conversation.id}`;
+        document.getElementById('userId').textContent = subtitle;
     }
 
     renderMessages(conversation) {
         const chatMessages = document.getElementById('chatMessages');
         if (!chatMessages) return;
 
-        chatMessages.innerHTML = conversation.messages.map(msg => {
-            return this.createMessageHTML(msg);
-        }).join('');
+        let html = '';
+        let lastSessionId = null;
 
+        conversation.messages.forEach((msg, index) => {
+            // Check if session changed - insert session banner
+            if (msg.session_id && msg.session_id !== lastSessionId) {
+                // Find session info
+                const session = conversation.sessions && conversation.sessions.find(s => s.session_id === msg.session_id);
+
+                if (session && index > 0) { // Don't show banner for first session
+                    const sessionTime = this.formatSessionTime(session.started_at);
+                    html += `
+                        <div class="session-banner">
+                            <div class="session-banner-line"></div>
+                            <div class="session-banner-content">
+                                <div class="session-banner-title">Sesión #${session.session_id} iniciada</div>
+                                <div class="session-banner-time">${sessionTime}</div>
+                            </div>
+                            <div class="session-banner-line"></div>
+                        </div>
+                    `;
+                }
+
+                lastSessionId = msg.session_id;
+            }
+
+            html += this.createMessageHTML(msg);
+        });
+
+        chatMessages.innerHTML = html;
         this.scrollToBottom();
     }
 
@@ -400,6 +327,32 @@ class InfinitixControlPanel {
 
         // Show time
         return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    formatSessionTime(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const isToday = date.toDateString() === now.toDateString();
+
+        if (isToday) {
+            return `Hoy a las ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const isYesterday = date.toDateString() === yesterday.toDateString();
+
+        if (isYesterday) {
+            return `Ayer a las ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        return date.toLocaleDateString('es-ES', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
     }
 
     escapeHtml(text) {

@@ -77,15 +77,30 @@ class ProductionServer {
   // Process a message from database
   // Note: DB row contains BOTH user_message and bot_response
   processMessageFromDB(dbMessage) {
-    const conversationId = dbMessage.user_id; // Use phone number as conversation ID
-    const userId = dbMessage.user_id;
+    const metadata = dbMessage.metadata || {};
+    const customUserId = metadata.user_id || '';
+    const fullName = metadata.full_name || '';
+
+    // Conversation identification logic:
+    // 1. If user_id provided (not empty): conversation_id = user_id
+    // 2. If user_id empty: conversation_id = "session_" + session_id
+    const conversationId = customUserId ? customUserId : `session_${dbMessage.session_id}`;
+
+    // Display name priority: full_name > user_name > phone_number > session_id
+    const displayName = fullName || dbMessage.user_name || dbMessage.user_id || `Session ${dbMessage.session_id}`;
 
     // Add user contact if not exists
-    if (!this.contacts.has(userId)) {
-      this.contacts.set(userId, {
-        user_id: userId,
-        name: dbMessage.user_name || `Usuario ${userId}`
+    const phoneNumber = dbMessage.user_id; // This is phone_number from chat_sessions_v2
+    if (!this.contacts.has(phoneNumber)) {
+      this.contacts.set(phoneNumber, {
+        user_id: phoneNumber,
+        name: displayName
       });
+    } else {
+      // Update name if full_name is provided
+      if (fullName) {
+        this.contacts.get(phoneNumber).name = fullName;
+      }
     }
 
     // Add bot contact if not exists
@@ -96,11 +111,46 @@ class ProductionServer {
       });
     }
 
+    // Check if we need to merge conversations (migration from session_XXX to user_id)
+    const sessionConvId = `session_${dbMessage.session_id}`;
+    if (customUserId && this.conversations.has(sessionConvId) && !this.conversations.has(customUserId)) {
+      // Migrate: Move all messages from session_XXX to user_id conversation
+      console.log(`🔀 Migrating conversation: ${sessionConvId} → ${customUserId}`);
+      const sessionConv = this.conversations.get(sessionConvId);
+
+      // Create new user conversation with migrated messages
+      this.conversations.set(customUserId, {
+        id: customUserId,
+        display_name: displayName,
+        user_id: customUserId,
+        sessions: [{
+          session_id: dbMessage.session_id,
+          started_at: sessionConv.messages.length > 0 ? sessionConv.messages[0].timestamp : Date.now(),
+          phone_number: phoneNumber,
+          message_count: sessionConv.messages.length
+        }],
+        messages: [...sessionConv.messages],
+        lastMessage: sessionConv.lastMessage,
+        lastTimestamp: sessionConv.lastTimestamp,
+        unread: sessionConv.unread
+      });
+
+      // Delete old session conversation
+      this.conversations.delete(sessionConvId);
+    }
+
     // Get or create conversation
     if (!this.conversations.has(conversationId)) {
       this.conversations.set(conversationId, {
         id: conversationId,
-        user_id: userId,
+        display_name: displayName,
+        user_id: customUserId || '',
+        sessions: [{
+          session_id: dbMessage.session_id,
+          started_at: dbMessage.timestamp,
+          phone_number: phoneNumber,
+          message_count: 0
+        }],
         messages: [],
         lastMessage: '',
         lastTimestamp: 0,
@@ -110,13 +160,35 @@ class ProductionServer {
 
     const conversation = this.conversations.get(conversationId);
 
+    // Update display name if full_name is provided
+    if (fullName) {
+      conversation.display_name = fullName;
+    }
+
+    // Check if this is a new session for the same conversation
+    const existingSession = conversation.sessions.find(s => s.session_id === dbMessage.session_id);
+    if (!existingSession) {
+      // New session detected - add to sessions array
+      conversation.sessions.push({
+        session_id: dbMessage.session_id,
+        started_at: dbMessage.timestamp,
+        phone_number: phoneNumber,
+        message_count: 0
+      });
+
+      // Sort sessions by started_at
+      conversation.sessions.sort((a, b) => a.started_at - b.started_at);
+    }
+
     // Add user message
     if (dbMessage.user_message) {
       const userMessage = {
         id: `${dbMessage.timestamp}_user_${dbMessage.id}`,
-        user_id: userId,
+        user_id: phoneNumber,
         message: dbMessage.user_message,
-        timestamp: dbMessage.timestamp
+        timestamp: dbMessage.timestamp,
+        session_id: dbMessage.session_id,
+        metadata: metadata
       };
 
       // Check if message already exists (avoid duplicates)
@@ -125,6 +197,10 @@ class ProductionServer {
         conversation.messages.push(userMessage);
         conversation.lastMessage = dbMessage.user_message;
         conversation.lastTimestamp = dbMessage.timestamp;
+
+        // Update session message count
+        const session = conversation.sessions.find(s => s.session_id === dbMessage.session_id);
+        if (session) session.message_count++;
       }
     }
 
@@ -134,7 +210,9 @@ class ProductionServer {
         id: `${dbMessage.timestamp}_bot_${dbMessage.id}`,
         user_id: '0', // Bot user_id
         message: dbMessage.bot_response,
-        timestamp: dbMessage.timestamp + 1 // +1ms to ensure bot message comes after user
+        timestamp: dbMessage.timestamp + 1, // +1ms to ensure bot message comes after user
+        session_id: dbMessage.session_id,
+        metadata: metadata
       };
 
       // Check if message already exists
@@ -143,6 +221,10 @@ class ProductionServer {
         conversation.messages.push(botMessage);
         conversation.lastMessage = dbMessage.bot_response;
         conversation.lastTimestamp = dbMessage.timestamp + 1;
+
+        // Update session message count
+        const session = conversation.sessions.find(s => s.session_id === dbMessage.session_id);
+        if (session) session.message_count++;
       }
     }
 
@@ -220,9 +302,9 @@ class ProductionServer {
     // Webhook: Receive user message
     this.app.post('/webhook/user-message', verifyWebhook, async (req, res) => {
       try {
-        const { message, message_id, session_id } = req.body;
+        const { message, message_id, session_id, user_id, full_name } = req.body;
 
-        console.log(`📨 User message received: session ${session_id} - ${message?.substring(0, 50) || 'no message'}...`);
+        console.log(`📨 User message received: session ${session_id}, user_id: ${user_id || 'none'} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
         if (!session_id || !message) {
@@ -258,6 +340,17 @@ class ProductionServer {
         // Generate message_id if not provided
         const finalMessageId = message_id || `msg_${Date.now()}_${session_id}`;
 
+        // Build metadata with user_id and full_name
+        const metadata = {
+          source: 'webhook',
+          user_id: user_id || '',
+          full_name: full_name || '',
+          session_info: {
+            session_id: session_id,
+            phone_number: phone_number
+          }
+        };
+
         // Store in database
         const messageData = {
           session_id: session_id,
@@ -265,10 +358,13 @@ class ProductionServer {
           user_message: message,
           bot_response: null,
           intent: null,
-          metadata: { source: 'webhook' }
+          metadata: metadata
         };
 
         await database.insertMessage(messageData);
+
+        // Determine conversation ID using the new logic
+        const conversationId = user_id ? user_id : `session_${session_id}`;
 
         // Create DB message format for processing
         const dbMessage = {
@@ -279,13 +375,14 @@ class ProductionServer {
           bot_response: null,
           timestamp: Date.now(),
           user_id: phone_number,
-          user_name: user_name || phone_number
+          user_name: user_name || phone_number,
+          metadata: metadata
         };
 
         // Process and broadcast
         this.processMessageFromDB(dbMessage);
 
-        const conversation = this.conversations.get(phone_number);
+        const conversation = this.conversations.get(conversationId);
 
         // Broadcast contact update
         this.broadcast({
@@ -298,7 +395,7 @@ class ProductionServer {
           this.broadcast({
             type: 'new_message',
             data: {
-              conversation_id: phone_number,
+              conversation_id: conversationId,
               message: conversation.messages[conversation.messages.length - 1],
               conversation
             }
@@ -318,9 +415,9 @@ class ProductionServer {
     // Webhook: Receive bot response
     this.app.post('/webhook/bot-response', verifyWebhook, async (req, res) => {
       try {
-        const { message, message_id } = req.body;
+        const { message, message_id, user_id, full_name } = req.body;
 
-        console.log(`🤖 Bot response received: ${message_id} - ${message?.substring(0, 50) || 'no message'}...`);
+        console.log(`🤖 Bot response received: ${message_id}, user_id: ${user_id || 'none'} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
         if (!message_id || !message) {
@@ -330,22 +427,14 @@ class ProductionServer {
           });
         }
 
-        // Update bot response in database and get the message info
-        const updatedId = await database.updateBotResponse(message_id, message);
-
-        if (!updatedId) {
-          return res.status(404).json({
-            success: false,
-            error: 'Message not found. Send user message first.'
-          });
-        }
-
-        // Fetch the complete message from database to get phone_number
-        const query = `
+        // Fetch the complete message from database to get existing metadata
+        const fetchQuery = `
           SELECT
+            cm.session_id,
             cm.user_message,
             cm.bot_response,
             cm.timestamp,
+            cm.metadata,
             cs.phone_number as user_id,
             cs.user_name
           FROM chat_messages_v2 cm
@@ -353,32 +442,65 @@ class ProductionServer {
           WHERE cm.message_id = $1
         `;
 
-        const result = await database.pool.query(query, [message_id]);
+        const fetchResult = await database.pool.query(fetchQuery, [message_id]);
 
-        if (result.rows.length === 0) {
+        if (fetchResult.rows.length === 0) {
           return res.status(404).json({
             success: false,
-            error: 'Message not found in database'
+            error: 'Message not found. Send user message first.'
           });
         }
 
-        const dbRow = result.rows[0];
+        const dbRow = fetchResult.rows[0];
+        const existingMetadata = dbRow.metadata || {};
+
+        // Update metadata with user_id and full_name if provided
+        const updatedMetadata = {
+          ...existingMetadata,
+          user_id: user_id || existingMetadata.user_id || '',
+          full_name: full_name || existingMetadata.full_name || '',
+          bot_response_updated: true
+        };
+
+        // Update bot response in database with updated metadata
+        const updateQuery = `
+          UPDATE chat_messages_v2
+          SET bot_response = $1,
+              metadata = $2
+          WHERE message_id = $3
+          RETURNING id
+        `;
+
+        const updateResult = await database.pool.query(updateQuery, [message, updatedMetadata, message_id]);
+
+        if (updateResult.rows.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: 'Failed to update bot response'
+          });
+        }
+
+        // Determine conversation ID using the new logic
+        const customUserId = updatedMetadata.user_id || '';
+        const conversationId = customUserId ? customUserId : `session_${dbRow.session_id}`;
 
         // Create DB message format for processing
         const dbMessage = {
           id: Date.now(),
+          session_id: dbRow.session_id,
           message_id,
           user_message: dbRow.user_message,
           bot_response: message,
           timestamp: Date.now(),
           user_id: dbRow.user_id, // phone_number from database
-          user_name: dbRow.user_name
+          user_name: dbRow.user_name,
+          metadata: updatedMetadata
         };
 
         // Process and broadcast
         this.processMessageFromDB(dbMessage);
 
-        const conversation = this.conversations.get(dbRow.user_id);
+        const conversation = this.conversations.get(conversationId);
 
         // Broadcast contact update (bot)
         this.broadcast({
@@ -391,7 +513,7 @@ class ProductionServer {
           this.broadcast({
             type: 'new_message',
             data: {
-              conversation_id: dbRow.user_id,
+              conversation_id: conversationId,
               message: conversation.messages[conversation.messages.length - 1],
               conversation
             }

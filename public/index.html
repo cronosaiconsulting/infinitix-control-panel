@@ -28,58 +28,12 @@
             </div>
         </header>
 
-        <!-- Demo Start Screen -->
-        <div class="demo-start-screen" id="demoStartScreen">
-            <div class="demo-start-content">
-                <div class="demo-icon">
-                    <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
-                        <circle cx="40" cy="40" r="38" stroke="#4f46e5" stroke-width="4"/>
-                        <path d="M30 25 L30 55 L55 40 Z" fill="#4f46e5"/>
-                    </svg>
-                </div>
-                <h2>Bienvenido al Panel de Control de Infinitix</h2>
-                <p>Sistema de gestión de conversaciones de WhatsApp en tiempo real</p>
-                <p class="demo-description">
-                    Este demo simula un sistema de atención al cliente donde Infinitix,
-                    nuestro asistente de IA, gestiona múltiples conversaciones simultáneas
-                    con clientes de OCC Sport Plus, empresa especializada en accesorios para automóviles.
-                </p>
-                <button class="start-demo-btn" id="startDemoBtn">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-                        <path d="M8 5 L8 19 L19 12 Z" fill="white"/>
-                    </svg>
-                    INICIAR DEMO
-                </button>
-                <div class="demo-stats">
-                    <div class="stat-item">
-                        <span class="stat-number">10</span>
-                        <span class="stat-label">Conversaciones</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">~100</span>
-                        <span class="stat-label">Mensajes</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-number">5</span>
-                        <span class="stat-label">Minutos</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <!-- Main Content -->
-        <div class="main-content" id="mainContent" style="display: none;">
+        <div class="main-content" id="mainContent">
             <!-- Sidebar - Conversation List -->
             <aside class="sidebar">
                 <div class="sidebar-header">
                     <h2>Conversaciones</h2>
-                    <button class="stop-demo-btn" id="stopDemoBtn">Detener Demo</button>
-                </div>
-                <div class="demo-progress" id="demoProgress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <p class="progress-text" id="progressText">Cargando conversaciones...</p>
                 </div>
                 <div class="conversation-list" id="conversationList">
                     <div class="empty-state">
@@ -123,7 +77,7 @@
                     </div>
 
                     <div class="chat-input">
-                        <input type="text" placeholder="Escribe un mensaje (solo lectura en modo demo)..." disabled>
+                        <input type="text" placeholder="Este panel es solo de monitoreo..." disabled>
                         <button disabled>
                             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                                 <path d="M2 3l16 7-16 7V3z"/>

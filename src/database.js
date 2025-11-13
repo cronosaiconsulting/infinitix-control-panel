@@ -101,18 +101,34 @@ class Database {
     }
   }
 
-  // Update bot response for existing message
-  async updateBotResponse(messageId, botResponse) {
-    const query = `
-      UPDATE chat_messages_v2
-      SET bot_response = $1,
-          metadata = metadata || '{"bot_response_updated": true}'::jsonb
-      WHERE message_id = $2
-      RETURNING id
-    `;
+  // Update bot response for existing message (with metadata)
+  async updateBotResponse(messageId, botResponse, metadata = null) {
+    let query, values;
+
+    if (metadata) {
+      // Update both bot_response and metadata
+      query = `
+        UPDATE chat_messages_v2
+        SET bot_response = $1,
+            metadata = $2
+        WHERE message_id = $3
+        RETURNING id
+      `;
+      values = [botResponse, metadata, messageId];
+    } else {
+      // Only update bot_response, preserve existing metadata
+      query = `
+        UPDATE chat_messages_v2
+        SET bot_response = $1,
+            metadata = metadata || '{"bot_response_updated": true}'::jsonb
+        WHERE message_id = $2
+        RETURNING id
+      `;
+      values = [botResponse, messageId];
+    }
 
     try {
-      const result = await this.pool.query(query, [botResponse, messageId]);
+      const result = await this.pool.query(query, values);
       return result.rows.length > 0 ? result.rows[0].id : null;
     } catch (error) {
       console.error('❌ Failed to update bot response:', error.message);

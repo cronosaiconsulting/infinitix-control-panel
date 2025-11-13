@@ -546,6 +546,57 @@ body {
     color: var(--text-light);
 }
 
+/* Session Banner */
+.session-banner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 2rem 0;
+    padding: 0 2rem;
+}
+
+.session-banner-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--border-color), transparent);
+}
+
+.session-banner-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-color);
+    border-radius: 1rem;
+    border: 1px solid var(--border-color);
+}
+
+.session-banner-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.session-banner-time {
+    font-size: 0.7rem;
+    color: var(--text-light);
+}
+
+/* Session count badge */
+.session-count {
+    display: inline-block;
+    padding: 0.125rem 0.5rem;
+    background: var(--primary-color);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 0.75rem;
+    margin-left: 0.5rem;
+}
+
 .chat-input {
     background: var(--surface-color);
     border-top: 1px solid var(--border-color);

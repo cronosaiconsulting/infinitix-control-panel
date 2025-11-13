@@ -76,7 +76,9 @@ RETURNING id
 {
   "message": "{{$json.user_message}}",
   "session_id": {{$json.session_id}},
-  "message_id": "{{$json.message_id}}"
+  "message_id": "{{$json.message_id}}",
+  "user_id": "{{$json.user_id}}",
+  "full_name": "{{$json.full_name}}"
 }
 ```
 
@@ -86,6 +88,13 @@ RETURNING id
 
 **Optional Fields:**
 - `message_id` - Unique message ID (auto-generated if not provided)
+- `user_id` - External user identifier (e.g., "usr_12345"). If provided, groups all sessions for this user into ONE conversation
+- `full_name` - User's full name (e.g., "María García López"). Updates conversation display name
+
+**Conversation Logic:**
+- If `user_id` is provided: conversation_id = `user_id` (all sessions merge into one conversation)
+- If `user_id` is empty: conversation_id = `"session_" + session_id` (each session is separate)
+- When `user_id` becomes available for a session, messages automatically merge into user's conversation
 
 **Note:** `phone_number` and `user_name` are NOT needed - they're looked up from chat_sessions_v2 using session_id
 
@@ -107,13 +116,19 @@ RETURNING id
 ```json
 {
   "message": "{{$json.bot_response}}",
-  "message_id": "{{$json.message_id}}"
+  "message_id": "{{$json.message_id}}",
+  "user_id": "{{$json.user_id}}",
+  "full_name": "{{$json.full_name}}"
 }
 ```
 
 **Required Fields:**
 - `message_id` - Same message_id from user message webhook (links to existing row)
 - `message` - Bot's response text
+
+**Optional Fields:**
+- `user_id` - External user identifier (for consistency with user message)
+- `full_name` - User's full name (updates display name if changed)
 
 **Note:** `phone_number` is NOT needed - it's looked up from the database using `message_id`
 
