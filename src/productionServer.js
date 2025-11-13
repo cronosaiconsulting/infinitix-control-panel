@@ -220,44 +220,52 @@ class ProductionServer {
     // Webhook: Receive user message
     this.app.post('/webhook/user-message', verifyWebhook, async (req, res) => {
       try {
-        const { phone_number, user_name, message, message_id, session_id } = req.body;
+        const { message, message_id, session_id } = req.body;
 
-        console.log(`📨 User message received: ${phone_number} - ${message?.substring(0, 50) || 'no message'}...`);
+        console.log(`📨 User message received: session ${session_id} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
-        if (!phone_number || !message) {
+        if (!session_id || !message) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required fields: phone_number, message'
+            error: 'Missing required fields: session_id, message'
           });
         }
 
-        // Get or find session
-        let sessionIdToUse = session_id;
-        if (!sessionIdToUse) {
-          const session = await database.getSessionByPhone(phone_number);
-          sessionIdToUse = session ? session.session_id : null;
-        }
+        // Fetch session info from database to get phone_number and user_name
+        const sessionQuery = `
+          SELECT
+            id as session_id,
+            phone_number,
+            user_name
+          FROM chat_sessions_v2
+          WHERE id = $1
+        `;
 
-        // If no session found, return error (session should be created by n8n)
-        if (!sessionIdToUse) {
-          return res.status(400).json({
+        const sessionResult = await database.pool.query(sessionQuery, [session_id]);
+
+        if (sessionResult.rows.length === 0) {
+          return res.status(404).json({
             success: false,
-            error: 'No session found for phone number. Session must be created first.'
+            error: 'Session not found. Create session in chat_sessions_v2 first.'
           });
         }
+
+        const session = sessionResult.rows[0];
+        const phone_number = session.phone_number;
+        const user_name = session.user_name;
 
         // Generate message_id if not provided
-        const finalMessageId = message_id || `msg_${Date.now()}_${phone_number}`;
+        const finalMessageId = message_id || `msg_${Date.now()}_${session_id}`;
 
         // Store in database
         const messageData = {
-          session_id: sessionIdToUse,
+          session_id: session_id,
           message_id: finalMessageId,
           user_message: message,
           bot_response: null,
           intent: null,
-          metadata: { source: 'webhook', user_name }
+          metadata: { source: 'webhook' }
         };
 
         await database.insertMessage(messageData);
@@ -265,7 +273,7 @@ class ProductionServer {
         // Create DB message format for processing
         const dbMessage = {
           id: Date.now(),
-          session_id: sessionIdToUse,
+          session_id: session_id,
           message_id: finalMessageId,
           user_message: message,
           bot_response: null,

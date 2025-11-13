@@ -74,22 +74,20 @@ RETURNING id
 **Body:**
 ```json
 {
-  "phone_number": "{{$json.phone_number}}",
-  "user_name": "{{$json.user_name}}",
   "message": "{{$json.user_message}}",
-  "message_id": "{{$json.message_id}}",
-  "session_id": {{$json.session_id}}
+  "session_id": {{$json.session_id}},
+  "message_id": "{{$json.message_id}}"
 }
 ```
 
 **Required Fields:**
-- `phone_number` - User's phone number (used as conversation ID)
-- `message` - User's message text
 - `session_id` - Database session ID from chat_sessions_v2
+- `message` - User's message text
 
 **Optional Fields:**
-- `user_name` - User's name
 - `message_id` - Unique message ID (auto-generated if not provided)
+
+**Note:** `phone_number` and `user_name` are NOT needed - they're looked up from chat_sessions_v2 using session_id
 
 ### Node 5b: Send Bot Response Webhook
 
@@ -179,11 +177,9 @@ curl -X POST https://your-app.railway.app/webhook/user-message \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-secret" \
   -d '{
-    "phone_number": "34612345678",
-    "user_name": "Test User",
     "message": "Hello, test message",
-    "message_id": "msg_test_123",
-    "session_id": 1
+    "session_id": 1,
+    "message_id": "msg_test_123"
   }'
 ```
 
