@@ -24,8 +24,12 @@ class ProductionServer {
       return false;
     }
 
-    // Initialize table
-    await database.initializeTable();
+    // Check tables exist
+    const tablesExist = await database.checkTables();
+    if (!tablesExist) {
+      console.error('❌ Required tables not found. Production mode disabled.');
+      return false;
+    }
 
     // Load historical messages
     await this.loadHistoricalMessages();
@@ -71,16 +75,24 @@ class ProductionServer {
   }
 
   // Process a message from database
+  // Note: DB row contains BOTH user_message and bot_response
   processMessageFromDB(dbMessage) {
-    const conversationId = dbMessage.conversation_id;
-    const isBot = dbMessage.message_type === 'bot';
-    const userId = isBot ? '0' : dbMessage.user_id;
+    const conversationId = dbMessage.user_id; // Use phone number as conversation ID
+    const userId = dbMessage.user_id;
 
-    // Add contact if not exists
+    // Add user contact if not exists
     if (!this.contacts.has(userId)) {
       this.contacts.set(userId, {
         user_id: userId,
-        name: isBot ? 'Infinitix' : (dbMessage.user_name || `Usuario ${userId}`)
+        name: dbMessage.user_name || `Usuario ${userId}`
+      });
+    }
+
+    // Add bot contact if not exists
+    if (!this.contacts.has('0')) {
+      this.contacts.set('0', {
+        user_id: '0',
+        name: 'Infinitix'
       });
     }
 
@@ -88,7 +100,7 @@ class ProductionServer {
     if (!this.conversations.has(conversationId)) {
       this.conversations.set(conversationId, {
         id: conversationId,
-        user_id: dbMessage.user_id,
+        user_id: userId,
         messages: [],
         lastMessage: '',
         lastTimestamp: 0,
@@ -98,17 +110,44 @@ class ProductionServer {
 
     const conversation = this.conversations.get(conversationId);
 
-    // Add message to conversation
-    const message = {
-      id: `${dbMessage.timestamp}_${dbMessage.id}`,
-      user_id: userId,
-      message: dbMessage.message,
-      timestamp: dbMessage.timestamp
-    };
+    // Add user message
+    if (dbMessage.user_message) {
+      const userMessage = {
+        id: `${dbMessage.timestamp}_user_${dbMessage.id}`,
+        user_id: userId,
+        message: dbMessage.user_message,
+        timestamp: dbMessage.timestamp
+      };
 
-    conversation.messages.push(message);
-    conversation.lastMessage = dbMessage.message;
-    conversation.lastTimestamp = dbMessage.timestamp;
+      // Check if message already exists (avoid duplicates)
+      const exists = conversation.messages.some(m => m.id === userMessage.id);
+      if (!exists) {
+        conversation.messages.push(userMessage);
+        conversation.lastMessage = dbMessage.user_message;
+        conversation.lastTimestamp = dbMessage.timestamp;
+      }
+    }
+
+    // Add bot response (if exists)
+    if (dbMessage.bot_response) {
+      const botMessage = {
+        id: `${dbMessage.timestamp}_bot_${dbMessage.id}`,
+        user_id: '0', // Bot user_id
+        message: dbMessage.bot_response,
+        timestamp: dbMessage.timestamp + 1 // +1ms to ensure bot message comes after user
+      };
+
+      // Check if message already exists
+      const exists = conversation.messages.some(m => m.id === botMessage.id);
+      if (!exists) {
+        conversation.messages.push(botMessage);
+        conversation.lastMessage = dbMessage.bot_response;
+        conversation.lastTimestamp = dbMessage.timestamp + 1;
+      }
+    }
+
+    // Sort messages by timestamp
+    conversation.messages.sort((a, b) => a.timestamp - b.timestamp);
   }
 
   // Periodic sync with database
@@ -181,55 +220,84 @@ class ProductionServer {
     // Webhook: Receive user message
     this.app.post('/webhook/user-message', verifyWebhook, async (req, res) => {
       try {
-        const { user_id, user_name, message, timestamp, conversation_id } = req.body;
+        const { phone_number, user_name, message, message_id, session_id } = req.body;
 
-        console.log(`📨 User message received: ${user_id} - ${message.substring(0, 50)}...`);
+        console.log(`📨 User message received: ${phone_number} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
-        if (!user_id || !message || !conversation_id) {
+        if (!phone_number || !message) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required fields: user_id, message, conversation_id'
+            error: 'Missing required fields: phone_number, message'
           });
         }
 
+        // Get or find session
+        let sessionIdToUse = session_id;
+        if (!sessionIdToUse) {
+          const session = await database.getSessionByPhone(phone_number);
+          sessionIdToUse = session ? session.session_id : null;
+        }
+
+        // If no session found, return error (session should be created by n8n)
+        if (!sessionIdToUse) {
+          return res.status(400).json({
+            success: false,
+            error: 'No session found for phone number. Session must be created first.'
+          });
+        }
+
+        // Generate message_id if not provided
+        const finalMessageId = message_id || `msg_${Date.now()}_${phone_number}`;
+
         // Store in database
         const messageData = {
-          conversation_id,
-          user_id,
-          user_name,
-          message_type: 'user',
-          message,
-          timestamp: timestamp || Date.now()
+          session_id: sessionIdToUse,
+          message_id: finalMessageId,
+          user_message: message,
+          bot_response: null,
+          intent: null,
+          metadata: { source: 'webhook', user_name }
         };
 
         await database.insertMessage(messageData);
 
-        // Process and broadcast
-        this.processMessageFromDB({
-          ...messageData,
-          id: Date.now() // Temporary ID
-        });
+        // Create DB message format for processing
+        const dbMessage = {
+          id: Date.now(),
+          session_id: sessionIdToUse,
+          message_id: finalMessageId,
+          user_message: message,
+          bot_response: null,
+          timestamp: Date.now(),
+          user_id: phone_number,
+          user_name: user_name || phone_number
+        };
 
-        const conversation = this.conversations.get(conversation_id);
+        // Process and broadcast
+        this.processMessageFromDB(dbMessage);
+
+        const conversation = this.conversations.get(phone_number);
 
         // Broadcast contact update
         this.broadcast({
           type: 'contact_update',
-          data: this.contacts.get(user_id)
+          data: this.contacts.get(phone_number)
         });
 
         // Broadcast new message
-        this.broadcast({
-          type: 'new_message',
-          data: {
-            conversation_id,
-            message: conversation.messages[conversation.messages.length - 1],
-            conversation
-          }
-        });
+        if (conversation) {
+          this.broadcast({
+            type: 'new_message',
+            data: {
+              conversation_id: phone_number,
+              message: conversation.messages[conversation.messages.length - 1],
+              conversation
+            }
+          });
+        }
 
-        res.json({ success: true, message: 'User message received' });
+        res.json({ success: true, message: 'User message received', message_id: finalMessageId });
       } catch (error) {
         console.error('❌ Error processing user message:', error);
         res.status(500).json({
@@ -242,37 +310,36 @@ class ProductionServer {
     // Webhook: Receive bot response
     this.app.post('/webhook/bot-response', verifyWebhook, async (req, res) => {
       try {
-        const { user_id, conversation_id, message, timestamp } = req.body;
+        const { phone_number, message, message_id } = req.body;
 
-        console.log(`🤖 Bot response received: ${conversation_id} - ${message.substring(0, 50)}...`);
+        console.log(`🤖 Bot response received: ${phone_number} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
-        if (!conversation_id || !message) {
+        if (!message_id || !message) {
           return res.status(400).json({
             success: false,
-            error: 'Missing required fields: conversation_id, message'
+            error: 'Missing required fields: message_id, message'
           });
         }
 
-        // Store in database
-        const messageData = {
-          conversation_id,
-          user_id: user_id || '0', // Bot has user_id '0'
-          user_name: 'Infinitix',
-          message_type: 'bot',
-          message,
-          timestamp: timestamp || Date.now()
+        // Update bot response in database
+        await database.updateBotResponse(message_id, message);
+
+        // Create DB message format for processing
+        const dbMessage = {
+          id: Date.now(),
+          message_id,
+          user_message: null, // Already processed
+          bot_response: message,
+          timestamp: Date.now(),
+          user_id: phone_number,
+          user_name: null // Will be fetched from contact
         };
 
-        await database.insertMessage(messageData);
-
         // Process and broadcast
-        this.processMessageFromDB({
-          ...messageData,
-          id: Date.now()
-        });
+        this.processMessageFromDB(dbMessage);
 
-        const conversation = this.conversations.get(conversation_id);
+        const conversation = this.conversations.get(phone_number);
 
         // Broadcast contact update (bot)
         this.broadcast({
@@ -281,14 +348,16 @@ class ProductionServer {
         });
 
         // Broadcast new message
-        this.broadcast({
-          type: 'new_message',
-          data: {
-            conversation_id,
-            message: conversation.messages[conversation.messages.length - 1],
-            conversation
-          }
-        });
+        if (conversation) {
+          this.broadcast({
+            type: 'new_message',
+            data: {
+              conversation_id: phone_number,
+              message: conversation.messages[conversation.messages.length - 1],
+              conversation
+            }
+          });
+        }
 
         res.json({ success: true, message: 'Bot response received' });
       } catch (error) {

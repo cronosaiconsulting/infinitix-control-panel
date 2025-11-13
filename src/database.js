@@ -1,5 +1,5 @@
 // PostgreSQL Database Connection Module
-// Connects to chat_messages_v2 table for message synchronization
+// Connects to existing chat_messages_v2 and chat_sessions_v2 tables
 
 const { Pool } = require('pg');
 
@@ -24,6 +24,7 @@ class Database {
       // Test connection
       const client = await this.pool.connect();
       console.log('✅ PostgreSQL connected successfully');
+      console.log(`📍 Database: ${client.database}`);
       client.release();
 
       this.isConnected = true;
@@ -42,54 +43,53 @@ class Database {
     }
   }
 
-  // Create table if not exists
-  async initializeTable() {
-    const query = `
-      CREATE TABLE IF NOT EXISTS chat_messages_v2 (
-        id SERIAL PRIMARY KEY,
-        conversation_id VARCHAR(50) NOT NULL,
-        user_id VARCHAR(50) NOT NULL,
-        user_name VARCHAR(255),
-        message_type VARCHAR(10) NOT NULL CHECK (message_type IN ('user', 'bot')),
-        message TEXT NOT NULL,
-        timestamp BIGINT NOT NULL,
-        metadata JSONB,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_conversation_id ON chat_messages_v2(conversation_id);
-      CREATE INDEX IF NOT EXISTS idx_timestamp ON chat_messages_v2(timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_created_at ON chat_messages_v2(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_user_id ON chat_messages_v2(user_id);
-    `;
-
+  // Check if tables exist (no creation needed - using existing tables)
+  async checkTables() {
     try {
-      await this.pool.query(query);
-      console.log('✅ Database table initialized');
-      return true;
+      const query = `
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+        AND table_name IN ('chat_messages_v2', 'chat_sessions_v2')
+      `;
+
+      const result = await this.pool.query(query);
+      const tables = result.rows.map(row => row.table_name);
+
+      console.log(`📊 Found tables: ${tables.join(', ')}`);
+
+      if (tables.includes('chat_messages_v2') && tables.includes('chat_sessions_v2')) {
+        console.log('✅ Required tables exist');
+        return true;
+      } else {
+        console.warn('⚠️ Missing required tables');
+        return false;
+      }
     } catch (error) {
-      console.error('❌ Failed to initialize table:', error.message);
+      console.error('❌ Failed to check tables:', error.message);
       return false;
     }
   }
 
-  // Insert a new message
+  // Insert a new message (user message + bot response in same row)
   async insertMessage(messageData) {
     const query = `
       INSERT INTO chat_messages_v2
-        (conversation_id, user_id, user_name, message_type, message, timestamp, metadata)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+        (session_id, message_id, user_message, bot_response, intent, metadata)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (message_id) DO UPDATE
+      SET bot_response = EXCLUDED.bot_response,
+          metadata = EXCLUDED.metadata
       RETURNING id
     `;
 
     const values = [
-      messageData.conversation_id,
-      messageData.user_id,
-      messageData.user_name || null,
-      messageData.message_type, // 'user' or 'bot'
-      messageData.message,
-      messageData.timestamp,
-      messageData.metadata || null
+      messageData.session_id,
+      messageData.message_id,
+      messageData.user_message,
+      messageData.bot_response || null,
+      messageData.intent || null,
+      messageData.metadata || {}
     ];
 
     try {
@@ -101,37 +101,59 @@ class Database {
     }
   }
 
-  // Get all conversations (grouped by conversation_id)
-  async getConversations(limit = 100) {
+  // Update bot response for existing message
+  async updateBotResponse(messageId, botResponse) {
+    const query = `
+      UPDATE chat_messages_v2
+      SET bot_response = $1,
+          metadata = metadata || '{"bot_response_updated": true}'::jsonb
+      WHERE message_id = $2
+      RETURNING id
+    `;
+
+    try {
+      const result = await this.pool.query(query, [botResponse, messageId]);
+      return result.rows.length > 0 ? result.rows[0].id : null;
+    } catch (error) {
+      console.error('❌ Failed to update bot response:', error.message);
+      throw error;
+    }
+  }
+
+  // Get all sessions with their latest messages
+  async getSessions(limit = 100) {
     const query = `
       WITH latest_messages AS (
-        SELECT DISTINCT ON (conversation_id)
-          conversation_id,
-          user_id,
-          user_name,
-          message as last_message,
-          timestamp as last_timestamp,
-          message_type
-        FROM chat_messages_v2
-        ORDER BY conversation_id, timestamp DESC
+        SELECT DISTINCT ON (cm.session_id)
+          cm.session_id,
+          cm.user_message,
+          cm.bot_response,
+          cm.timestamp,
+          cs.phone_number,
+          cs.user_name,
+          cs.status
+        FROM chat_messages_v2 cm
+        JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
+        ORDER BY cm.session_id, cm.timestamp DESC
       ),
       message_counts AS (
         SELECT
-          conversation_id,
+          session_id,
           COUNT(*) as message_count
         FROM chat_messages_v2
-        GROUP BY conversation_id
+        GROUP BY session_id
       )
       SELECT
-        lm.conversation_id,
-        lm.user_id,
+        lm.session_id,
+        lm.phone_number as user_id,
         lm.user_name,
-        lm.last_message,
-        lm.last_timestamp,
-        mc.message_count
+        COALESCE(lm.bot_response, lm.user_message) as last_message,
+        EXTRACT(EPOCH FROM lm.timestamp) * 1000 as last_timestamp,
+        mc.message_count,
+        lm.status
       FROM latest_messages lm
-      LEFT JOIN message_counts mc ON lm.conversation_id = mc.conversation_id
-      ORDER BY lm.last_timestamp DESC
+      LEFT JOIN message_counts mc ON lm.session_id = mc.session_id
+      ORDER BY lm.timestamp DESC
       LIMIT $1
     `;
 
@@ -139,34 +161,61 @@ class Database {
       const result = await this.pool.query(query, [limit]);
       return result.rows;
     } catch (error) {
-      console.error('❌ Failed to get conversations:', error.message);
+      console.error('❌ Failed to get sessions:', error.message);
       throw error;
     }
   }
 
-  // Get messages for a specific conversation
-  async getConversationMessages(conversationId, limit = 1000, offset = 0) {
+  // Get messages for a specific session
+  async getSessionMessages(sessionId, limit = 1000, offset = 0) {
     const query = `
       SELECT
-        id,
-        conversation_id,
-        user_id,
-        user_name,
-        message_type,
-        message,
-        timestamp,
-        created_at
-      FROM chat_messages_v2
-      WHERE conversation_id = $1
-      ORDER BY timestamp ASC
+        cm.id,
+        cm.session_id,
+        cm.message_id,
+        cm.user_message,
+        cm.bot_response,
+        cm.intent,
+        EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
+        cm.metadata,
+        cs.phone_number as user_id,
+        cs.user_name
+      FROM chat_messages_v2 cm
+      JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
+      WHERE cm.session_id = $1
+      ORDER BY cm.timestamp ASC
       LIMIT $2 OFFSET $3
     `;
 
     try {
-      const result = await this.pool.query(query, [conversationId, limit, offset]);
+      const result = await this.pool.query(query, [sessionId, limit, offset]);
       return result.rows;
     } catch (error) {
       console.error('❌ Failed to get messages:', error.message);
+      throw error;
+    }
+  }
+
+  // Get session info by phone number
+  async getSessionByPhone(phoneNumber) {
+    const query = `
+      SELECT
+        id as session_id,
+        phone_number as user_id,
+        user_name,
+        status,
+        created_at
+      FROM chat_sessions_v2
+      WHERE phone_number = $1
+      ORDER BY created_at DESC
+      LIMIT 1
+    `;
+
+    try {
+      const result = await this.pool.query(query, [phoneNumber]);
+      return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+      console.error('❌ Failed to get session by phone:', error.message);
       throw error;
     }
   }
@@ -175,21 +224,25 @@ class Database {
   async getRecentMessages(days = 7) {
     const query = `
       SELECT
-        id,
-        conversation_id,
-        user_id,
-        user_name,
-        message_type,
-        message,
-        timestamp,
-        created_at
-      FROM chat_messages_v2
-      WHERE created_at >= NOW() - INTERVAL '${days} days'
-      ORDER BY timestamp ASC
+        cm.id,
+        cm.session_id,
+        cm.message_id,
+        cm.user_message,
+        cm.bot_response,
+        cm.intent,
+        EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
+        cm.metadata,
+        cs.phone_number as user_id,
+        cs.user_name
+      FROM chat_messages_v2 cm
+      JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
+      WHERE cm.timestamp >= NOW() - INTERVAL '${days} days'
+      ORDER BY cm.timestamp ASC
     `;
 
     try {
       const result = await this.pool.query(query);
+      console.log(`📥 Loaded ${result.rows.length} messages from last ${days} days`);
       return result.rows;
     } catch (error) {
       console.error('❌ Failed to get recent messages:', error.message);
@@ -201,17 +254,20 @@ class Database {
   async getMessagesSince(timestamp) {
     const query = `
       SELECT
-        id,
-        conversation_id,
-        user_id,
-        user_name,
-        message_type,
-        message,
-        timestamp,
-        created_at
-      FROM chat_messages_v2
-      WHERE timestamp > $1
-      ORDER BY timestamp ASC
+        cm.id,
+        cm.session_id,
+        cm.message_id,
+        cm.user_message,
+        cm.bot_response,
+        cm.intent,
+        EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
+        cm.metadata,
+        cs.phone_number as user_id,
+        cs.user_name
+      FROM chat_messages_v2 cm
+      JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
+      WHERE EXTRACT(EPOCH FROM cm.timestamp) * 1000 > $1
+      ORDER BY cm.timestamp ASC
     `;
 
     try {
@@ -223,18 +279,21 @@ class Database {
     }
   }
 
-  // Search conversations by user name or message content
-  async searchConversations(searchTerm) {
+  // Search sessions by user name or phone number
+  async searchSessions(searchTerm) {
     const query = `
       SELECT DISTINCT
-        conversation_id,
-        user_id,
-        user_name
-      FROM chat_messages_v2
+        cs.id as session_id,
+        cs.phone_number as user_id,
+        cs.user_name
+      FROM chat_sessions_v2 cs
+      LEFT JOIN chat_messages_v2 cm ON cs.id = cm.session_id
       WHERE
-        user_name ILIKE $1 OR
-        message ILIKE $1
-      ORDER BY timestamp DESC
+        cs.user_name ILIKE $1 OR
+        cs.phone_number ILIKE $1 OR
+        cm.user_message ILIKE $1 OR
+        cm.bot_response ILIKE $1
+      ORDER BY cs.created_at DESC
       LIMIT 50
     `;
 
@@ -251,13 +310,15 @@ class Database {
   async getStats() {
     const query = `
       SELECT
-        COUNT(DISTINCT conversation_id) as total_conversations,
+        COUNT(DISTINCT cm.session_id) as total_sessions,
         COUNT(*) as total_messages,
-        COUNT(*) FILTER (WHERE message_type = 'user') as user_messages,
-        COUNT(*) FILTER (WHERE message_type = 'bot') as bot_messages,
-        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') as messages_24h,
-        COUNT(DISTINCT conversation_id) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') as active_conversations_24h
-      FROM chat_messages_v2
+        COUNT(*) FILTER (WHERE cm.user_message IS NOT NULL AND cm.user_message != '') as user_messages,
+        COUNT(*) FILTER (WHERE cm.bot_response IS NOT NULL AND cm.bot_response != '') as bot_messages,
+        COUNT(*) FILTER (WHERE cm.timestamp >= NOW() - INTERVAL '24 hours') as messages_24h,
+        COUNT(DISTINCT cm.session_id) FILTER (WHERE cm.timestamp >= NOW() - INTERVAL '24 hours') as active_sessions_24h,
+        COUNT(DISTINCT cs.id) FILTER (WHERE cs.status = 'active') as active_sessions
+      FROM chat_messages_v2 cm
+      JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
     `;
 
     try {
