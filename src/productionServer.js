@@ -310,9 +310,9 @@ class ProductionServer {
     // Webhook: Receive bot response
     this.app.post('/webhook/bot-response', verifyWebhook, async (req, res) => {
       try {
-        const { phone_number, message, message_id } = req.body;
+        const { message, message_id } = req.body;
 
-        console.log(`🤖 Bot response received: ${phone_number} - ${message?.substring(0, 50) || 'no message'}...`);
+        console.log(`🤖 Bot response received: ${message_id} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
         if (!message_id || !message) {
@@ -322,24 +322,55 @@ class ProductionServer {
           });
         }
 
-        // Update bot response in database
-        await database.updateBotResponse(message_id, message);
+        // Update bot response in database and get the message info
+        const updatedId = await database.updateBotResponse(message_id, message);
+
+        if (!updatedId) {
+          return res.status(404).json({
+            success: false,
+            error: 'Message not found. Send user message first.'
+          });
+        }
+
+        // Fetch the complete message from database to get phone_number
+        const query = `
+          SELECT
+            cm.user_message,
+            cm.bot_response,
+            cm.timestamp,
+            cs.phone_number as user_id,
+            cs.user_name
+          FROM chat_messages_v2 cm
+          JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
+          WHERE cm.message_id = $1
+        `;
+
+        const result = await database.pool.query(query, [message_id]);
+
+        if (result.rows.length === 0) {
+          return res.status(404).json({
+            success: false,
+            error: 'Message not found in database'
+          });
+        }
+
+        const dbRow = result.rows[0];
 
         // Create DB message format for processing
         const dbMessage = {
           id: Date.now(),
           message_id,
-          user_message: null, // Already processed
+          user_message: dbRow.user_message,
           bot_response: message,
           timestamp: Date.now(),
-          user_id: phone_number,
-          user_name: null // Will be fetched from contact
+          user_id: dbRow.user_id, // phone_number from database
+          user_name: dbRow.user_name
         };
 
         // Process and broadcast
         this.processMessageFromDB(dbMessage);
 
-        const conversation = this.conversations.get(phone_number);
+        const conversation = this.conversations.get(dbRow.user_id);
 
         // Broadcast contact update (bot)
         this.broadcast({
@@ -352,7 +383,7 @@ class ProductionServer {
           this.broadcast({
             type: 'new_message',
             data: {
-              conversation_id: phone_number,
+              conversation_id: dbRow.user_id,
               message: conversation.messages[conversation.messages.length - 1],
               conversation
             }

@@ -108,18 +108,16 @@ RETURNING id
 **Body:**
 ```json
 {
-  "phone_number": "{{$json.phone_number}}",
   "message": "{{$json.bot_response}}",
   "message_id": "{{$json.message_id}}"
 }
 ```
 
 **Required Fields:**
-- `message_id` - Same message_id from user message webhook
+- `message_id` - Same message_id from user message webhook (links to existing row)
 - `message` - Bot's response text
 
-**Optional Fields:**
-- `phone_number` - User's phone number (for reference)
+**Note:** `phone_number` is NOT needed - it's looked up from the database using `message_id`
 
 ---
 
@@ -202,9 +200,8 @@ curl -X POST https://your-app.railway.app/webhook/user-message \
 ```bash
 curl -X POST https://your-app.railway.app/webhook/bot-response \
   -H "Content-Type: application/json" \
-  -H "X-API-Key": your-secret" \
+  -H "X-API-Key: your-secret" \
   -d '{
-    "phone_number": "34612345678",
     "message": "Hello! How can I help you?",
     "message_id": "msg_test_123"
   }'
