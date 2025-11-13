@@ -1,3 +1,6 @@
+// Load environment variables
+require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -6,6 +9,7 @@ const axios = require('axios');
 const path = require('path');
 const { generateDemoData } = require('./demoData');
 const MessageScheduler = require('./MessageScheduler');
+const ProductionServer = require('./productionServer');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,6 +25,14 @@ const contacts = new Map();
 let clients = new Set();
 let demoRunning = false;
 let messageScheduler = null;
+let productionServer = null;
+
+// Determine mode (demo or production)
+const MODE = process.env.MODE || 'demo';
+const isDemoMode = MODE === 'demo';
+const isProductionMode = MODE === 'production' || MODE === 'hybrid';
+
+console.log(`🎯 Running in ${MODE} mode`);
 
 // Add default bot contact
 contacts.set('0', { user_id: '0', name: 'Infinitix' });
@@ -264,7 +276,7 @@ console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
 console.log(`🔌 PORT from env: ${process.env.PORT || 'not set (using default 3000)'}`);
 console.log(`🌐 Binding to: 0.0.0.0:${PORT}`);
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', async () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║                                                           ║
@@ -274,10 +286,31 @@ server.listen(PORT, '0.0.0.0', () => {
 ║      ✅ Server running on: 0.0.0.0:${PORT}                 ║
 ║      ✅ WebSocket ready for real-time updates              ║
 ║      ✅ Health check: http://localhost:${PORT}/health      ║
+║      ⚙️  Mode: ${MODE}                                     ║
 ║                                                           ║
 ╚═══════════════════════════════════════════════════════════╝
   `);
   console.log('✨ Server started successfully!');
+
+  // Initialize production mode if enabled
+  if (isProductionMode) {
+    productionServer = new ProductionServer(app, broadcast);
+    const initialized = await productionServer.initialize();
+
+    if (initialized) {
+      console.log(`
+╔═══════════════════════════════════════════════════════════╗
+║      🔥 PRODUCTION MODE ACTIVE                             ║
+║      📊 Database: Connected                                ║
+║      🔄 Auto-sync: Enabled                                 ║
+║      📡 Webhooks: /webhook/user-message                    ║
+║                  /webhook/bot-response                     ║
+╚═══════════════════════════════════════════════════════════╝
+      `);
+    }
+  } else {
+    console.log('💡 Running in DEMO mode. Start demo from the dashboard.');
+  }
 });
 
 // Log any server errors
@@ -290,11 +323,31 @@ server.on('error', (error) => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing server...');
+const gracefulShutdown = async (signal) => {
+  console.log(`\n${signal} received, closing server gracefully...`);
 
+  // Stop demo if running
+  if (messageScheduler) {
+    messageScheduler.stop();
+  }
+
+  // Stop production server if running
+  if (productionServer) {
+    await productionServer.shutdown();
+  }
+
+  // Close HTTP server
   server.close(() => {
-    console.log('Server closed');
+    console.log('✅ Server closed');
     process.exit(0);
   });
-});
+
+  // Force close after 10 seconds
+  setTimeout(() => {
+    console.error('⚠️ Forcing shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
