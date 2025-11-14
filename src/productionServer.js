@@ -90,6 +90,10 @@ class ProductionServer {
 
     console.log(`📊 Processing message: session=${dbMessage.session_id}, customer_id=${customer_id}, conv_id=${conversationId}`);
 
+    // Track if we actually added new messages (to avoid duplicate broadcasts)
+    let addedUserMessage = false;
+    let addedBotMessage = false;
+
     // Display name priority: full_name > customer_name > phone_number > session_id
     const displayName = fullName || dbMessage.user_name || dbMessage.user_id || `Session ${dbMessage.session_id}`;
 
@@ -233,6 +237,8 @@ class ProductionServer {
         // Update session message count
         const session = conversation.sessions.find(s => s.session_id === dbMessage.session_id);
         if (session) session.message_count++;
+
+        addedUserMessage = true;
       }
     }
 
@@ -257,11 +263,20 @@ class ProductionServer {
         // Update session message count
         const session = conversation.sessions.find(s => s.session_id === dbMessage.session_id);
         if (session) session.message_count++;
+
+        addedBotMessage = true;
       }
     }
 
     // Sort messages by timestamp
     conversation.messages.sort((a, b) => a.timestamp - b.timestamp);
+
+    // Return info about what was processed
+    return {
+      conversationId,
+      addedUserMessage,
+      addedBotMessage
+    };
   }
 
   // Periodic sync with database
@@ -287,21 +302,26 @@ class ProductionServer {
         console.log(`🔄 Synced ${newMessages.length} new messages from database`);
 
         for (const dbMessage of newMessages) {
-          this.processMessageFromDB(dbMessage);
+          // Process message and get result
+          const result = this.processMessageFromDB(dbMessage);
+          const { conversationId, addedUserMessage, addedBotMessage } = result;
 
-          // Broadcast the new message
-          const conversationId = dbMessage.conversation_id;
-          const conversation = this.conversations.get(conversationId);
+          // Only broadcast if we actually added new messages (avoid duplicates)
+          if (addedUserMessage || addedBotMessage) {
+            const conversation = this.conversations.get(conversationId);
 
-          if (conversation) {
-            this.broadcast({
-              type: 'new_message',
-              data: {
-                conversation_id: conversationId,
-                message: conversation.messages[conversation.messages.length - 1],
-                conversation: conversation
-              }
-            });
+            if (conversation) {
+              this.broadcast({
+                type: 'new_message',
+                data: {
+                  conversation_id: conversationId,
+                  message: conversation.messages[conversation.messages.length - 1],
+                  conversation: conversation
+                }
+              });
+            }
+          } else {
+            console.log(`⏭️ Sync: Message already exists - skipping broadcast to avoid duplicate`);
           }
         }
 
@@ -387,9 +407,6 @@ class ProductionServer {
 
         console.log(`📌 User message webhook: NO database write - only broadcasting to interface`);
 
-        // Determine conversation ID using customer_id if available, otherwise use metadata user_id or session_id
-        const conversationId = customer_id ? `customer_${customer_id}` : (user_id ? user_id : `session_${session_id}`);
-
         // Create DB message format for processing
         const dbMessage = {
           id: Date.now(),
@@ -404,27 +421,33 @@ class ProductionServer {
           metadata: metadata
         };
 
-        // Process and broadcast
-        this.processMessageFromDB(dbMessage);
+        // Process message and get result
+        const result = this.processMessageFromDB(dbMessage);
+        const { conversationId, addedUserMessage } = result;
 
-        const conversation = this.conversations.get(conversationId);
+        // Only broadcast if we actually added a new message (avoid duplicates)
+        if (addedUserMessage) {
+          const conversation = this.conversations.get(conversationId);
 
-        // Broadcast contact update
-        this.broadcast({
-          type: 'contact_update',
-          data: this.contacts.get(phone_number)
-        });
-
-        // Broadcast new message
-        if (conversation) {
+          // Broadcast contact update
           this.broadcast({
-            type: 'new_message',
-            data: {
-              conversation_id: conversationId,
-              message: conversation.messages[conversation.messages.length - 1],
-              conversation
-            }
+            type: 'contact_update',
+            data: this.contacts.get(phone_number)
           });
+
+          // Broadcast new message
+          if (conversation) {
+            this.broadcast({
+              type: 'new_message',
+              data: {
+                conversation_id: conversationId,
+                message: conversation.messages[conversation.messages.length - 1],
+                conversation
+              }
+            });
+          }
+        } else {
+          console.log(`⏭️ Message already exists - skipping broadcast to avoid duplicate`);
         }
 
         res.json({ success: true, message: 'User message received', message_id: finalMessageId });
@@ -490,10 +513,6 @@ class ProductionServer {
 
         console.log(`📌 Bot response webhook: NO database write - only broadcasting to interface`);
 
-        // Determine conversation ID using customer_id if available, otherwise metadata user_id or session_id
-        const customUserId = updatedMetadata.user_id || '';
-        const conversationId = dbRow.customer_id ? `customer_${dbRow.customer_id}` : (customUserId ? customUserId : `session_${dbRow.session_id}`);
-
         // Create DB message format for processing
         const dbMessage = {
           id: Date.now(),
@@ -508,27 +527,33 @@ class ProductionServer {
           metadata: updatedMetadata
         };
 
-        // Process and broadcast
-        this.processMessageFromDB(dbMessage);
+        // Process message and get result
+        const result = this.processMessageFromDB(dbMessage);
+        const { conversationId, addedBotMessage } = result;
 
-        const conversation = this.conversations.get(conversationId);
+        // Only broadcast if we actually added a new bot message (avoid duplicates)
+        if (addedBotMessage) {
+          const conversation = this.conversations.get(conversationId);
 
-        // Broadcast contact update (bot)
-        this.broadcast({
-          type: 'contact_update',
-          data: { user_id: '0', name: 'Infinitix' }
-        });
-
-        // Broadcast new message
-        if (conversation) {
+          // Broadcast contact update (bot)
           this.broadcast({
-            type: 'new_message',
-            data: {
-              conversation_id: conversationId,
-              message: conversation.messages[conversation.messages.length - 1],
-              conversation
-            }
+            type: 'contact_update',
+            data: { user_id: '0', name: 'Infinitix' }
           });
+
+          // Broadcast new message
+          if (conversation) {
+            this.broadcast({
+              type: 'new_message',
+              data: {
+                conversation_id: conversationId,
+                message: conversation.messages[conversation.messages.length - 1],
+                conversation
+              }
+            });
+          }
+        } else {
+          console.log(`⏭️ Bot response already exists - skipping broadcast to avoid duplicate`);
         }
 
         res.json({ success: true, message: 'Bot response received' });
