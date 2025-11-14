@@ -48,11 +48,11 @@ class ProductionServer {
   // Load historical messages from database
   async loadHistoricalMessages() {
     try {
-      const days = parseInt(process.env.INITIAL_LOAD_DAYS || '7');
-      console.log(`📥 Loading last ${days} days of messages...`);
+      const days = parseInt(process.env.INITIAL_LOAD_DAYS || '365');
+      console.log(`📥 Loading last ${days} days of messages (all historical data)...`);
 
       const messages = await database.getRecentMessages(days);
-      console.log(`📥 Loaded ${messages.length} historical messages`);
+      console.log(`📥 Loaded ${messages.length} historical messages from database`);
 
       // Process messages to rebuild conversations
       for (const dbMessage of messages) {
@@ -371,7 +371,7 @@ class ProductionServer {
         const customer_id = session.customer_id;
         const user_name = session.customer_name;
 
-        // Generate message_id if not provided
+        // Generate message_id if not provided (for response)
         const finalMessageId = message_id || `msg_${Date.now()}_${session_id}`;
 
         // Build metadata with user_id and full_name
@@ -385,17 +385,7 @@ class ProductionServer {
           }
         };
 
-        // Store in database
-        const messageData = {
-          session_id: session_id,
-          message_id: finalMessageId,
-          user_message: message,
-          bot_response: null,
-          intent: null,
-          metadata: metadata
-        };
-
-        await database.insertMessage(messageData);
+        console.log(`📌 User message webhook: NO database write - only broadcasting to interface`);
 
         // Determine conversation ID using customer_id if available, otherwise use metadata user_id or session_id
         const conversationId = customer_id ? `customer_${customer_id}` : (user_id ? user_id : `session_${session_id}`);
@@ -490,31 +480,15 @@ class ProductionServer {
         const dbRow = fetchResult.rows[0];
         const existingMetadata = dbRow.metadata || {};
 
-        // Update metadata with user_id and full_name if provided
+        // Build metadata with user_id and full_name if provided (for in-memory conversation)
         const updatedMetadata = {
           ...existingMetadata,
           user_id: user_id || existingMetadata.user_id || '',
           full_name: full_name || existingMetadata.full_name || '',
-          bot_response_updated: true
+          source: 'webhook'
         };
 
-        // Update bot response in database with updated metadata
-        const updateQuery = `
-          UPDATE chat_messages_v2
-          SET bot_response = $1,
-              metadata = $2
-          WHERE message_id = $3
-          RETURNING id
-        `;
-
-        const updateResult = await database.pool.query(updateQuery, [message, updatedMetadata, message_id]);
-
-        if (updateResult.rows.length === 0) {
-          return res.status(404).json({
-            success: false,
-            error: 'Failed to update bot response'
-          });
-        }
+        console.log(`📌 Bot response webhook: NO database write - only broadcasting to interface`);
 
         // Determine conversation ID using customer_id if available, otherwise metadata user_id or session_id
         const customUserId = updatedMetadata.user_id || '';
