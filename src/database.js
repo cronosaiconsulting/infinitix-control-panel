@@ -145,9 +145,9 @@ class Database {
           cm.user_message,
           cm.bot_response,
           cm.timestamp,
-          cs.phone_number,
-          cs.user_name,
-          cs.status
+          cs.user_id,
+          cs.customer_name,
+          cs.is_authenticated
         FROM chat_messages_v2 cm
         JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
         ORDER BY cm.session_id, cm.timestamp DESC
@@ -161,12 +161,12 @@ class Database {
       )
       SELECT
         lm.session_id,
-        lm.phone_number as user_id,
-        lm.user_name,
+        lm.user_id,
+        lm.customer_name as user_name,
         COALESCE(lm.bot_response, lm.user_message) as last_message,
         EXTRACT(EPOCH FROM lm.timestamp) * 1000 as last_timestamp,
         mc.message_count,
-        lm.status
+        lm.is_authenticated as status
       FROM latest_messages lm
       LEFT JOIN message_counts mc ON lm.session_id = mc.session_id
       ORDER BY lm.timestamp DESC
@@ -194,8 +194,8 @@ class Database {
         cm.intent,
         EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
         cm.metadata,
-        cs.phone_number as user_id,
-        cs.user_name
+        cs.user_id,
+        cs.customer_name as user_name
       FROM chat_messages_v2 cm
       JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
       WHERE cm.session_id = $1
@@ -217,12 +217,12 @@ class Database {
     const query = `
       SELECT
         id as session_id,
-        phone_number as user_id,
-        user_name,
-        status,
+        user_id,
+        customer_name as user_name,
+        is_authenticated as status,
         created_at
       FROM chat_sessions_v2
-      WHERE phone_number = $1
+      WHERE user_id = $1
       ORDER BY created_at DESC
       LIMIT 1
     `;
@@ -248,8 +248,8 @@ class Database {
         cm.intent,
         EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
         cm.metadata,
-        cs.phone_number as user_id,
-        cs.user_name
+        cs.user_id,
+        cs.customer_name as user_name
       FROM chat_messages_v2 cm
       JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
       WHERE cm.timestamp >= NOW() - INTERVAL '${days} days'
@@ -278,8 +278,8 @@ class Database {
         cm.intent,
         EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
         cm.metadata,
-        cs.phone_number as user_id,
-        cs.user_name
+        cs.user_id,
+        cs.customer_name as user_name
       FROM chat_messages_v2 cm
       JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
       WHERE EXTRACT(EPOCH FROM cm.timestamp) * 1000 > $1
@@ -300,13 +300,13 @@ class Database {
     const query = `
       SELECT DISTINCT
         cs.id as session_id,
-        cs.phone_number as user_id,
-        cs.user_name
+        cs.user_id,
+        cs.customer_name as user_name
       FROM chat_sessions_v2 cs
       LEFT JOIN chat_messages_v2 cm ON cs.id = cm.session_id
       WHERE
-        cs.user_name ILIKE $1 OR
-        cs.phone_number ILIKE $1 OR
+        cs.customer_name ILIKE $1 OR
+        cs.user_id ILIKE $1 OR
         cm.user_message ILIKE $1 OR
         cm.bot_response ILIKE $1
       ORDER BY cs.created_at DESC
@@ -332,7 +332,7 @@ class Database {
         COUNT(*) FILTER (WHERE cm.bot_response IS NOT NULL AND cm.bot_response != '') as bot_messages,
         COUNT(*) FILTER (WHERE cm.timestamp >= NOW() - INTERVAL '24 hours') as messages_24h,
         COUNT(DISTINCT cm.session_id) FILTER (WHERE cm.timestamp >= NOW() - INTERVAL '24 hours') as active_sessions_24h,
-        COUNT(DISTINCT cs.id) FILTER (WHERE cs.status = 'active') as active_sessions
+        COUNT(DISTINCT cs.id) FILTER (WHERE cs.is_authenticated = true) as active_sessions
       FROM chat_messages_v2 cm
       JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
     `;

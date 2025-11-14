@@ -314,12 +314,12 @@ class ProductionServer {
           });
         }
 
-        // Fetch session info from database to get phone_number and user_name
+        // Fetch session info from database to get user_id and customer_name
         const sessionQuery = `
           SELECT
             id as session_id,
-            phone_number,
-            user_name
+            user_id,
+            customer_name
           FROM chat_sessions_v2
           WHERE id = $1
         `;
@@ -334,8 +334,8 @@ class ProductionServer {
         }
 
         const session = sessionResult.rows[0];
-        const phone_number = session.phone_number;
-        const user_name = session.user_name;
+        const phone_number = session.user_id;
+        const user_name = session.customer_name;
 
         // Generate message_id if not provided
         const finalMessageId = message_id || `msg_${Date.now()}_${session_id}`;
@@ -435,8 +435,8 @@ class ProductionServer {
             cm.bot_response,
             cm.timestamp,
             cm.metadata,
-            cs.phone_number as user_id,
-            cs.user_name
+            cs.user_id,
+            cs.customer_name as user_name
           FROM chat_messages_v2 cm
           JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
           WHERE cm.message_id = $1
