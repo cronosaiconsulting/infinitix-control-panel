@@ -249,6 +249,7 @@ class Database {
         EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
         cm.metadata,
         cs.user_id,
+        cs.customer_id,
         cs.customer_name as user_name
       FROM chat_messages_v2 cm
       JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
@@ -279,6 +280,7 @@ class Database {
         EXTRACT(EPOCH FROM cm.timestamp) * 1000 as timestamp,
         cm.metadata,
         cs.user_id,
+        cs.customer_id,
         cs.customer_name as user_name
       FROM chat_messages_v2 cm
       JOIN chat_sessions_v2 cs ON cm.session_id = cs.id

@@ -62,6 +62,8 @@ class InfinitixControlPanel {
     }
 
     handleInit(data) {
+        console.log(`🔄 Initializing: ${data.conversations.length} conversations, ${data.contacts.length} contacts`);
+
         // Initialize with existing conversations
         data.conversations.forEach(conv => {
             this.conversations.set(conv.id, conv);
@@ -73,15 +75,19 @@ class InfinitixControlPanel {
 
         if (this.conversations.size > 0) {
             this.renderConversations();
+            console.log('✅ Conversations rendered');
         }
     }
 
     handleContactUpdate(data) {
+        console.log('👤 Contact updated:', data.user_id, data.name);
         this.contacts.set(data.user_id, data);
     }
 
     handleNewMessage(data) {
         const { conversation_id, message, conversation } = data;
+
+        console.log(`💬 New message in conversation ${conversation_id}:`, message.message?.substring(0, 50));
 
         // Update conversation
         this.conversations.set(conversation_id, conversation);
@@ -91,11 +97,14 @@ class InfinitixControlPanel {
 
         // If this is the current conversation, add message to chat
         if (this.currentConversationId === conversation_id) {
+            console.log('📝 Adding message to current conversation');
             this.renderMessage(message);
             this.scrollToBottom();
 
             // Mark as read
             this.markConversationAsRead(conversation_id);
+        } else {
+            console.log('🔔 Message in different conversation - showing notification');
         }
 
         // Play notification sound (optional)
@@ -103,6 +112,7 @@ class InfinitixControlPanel {
     }
 
     handleConversationRead(data) {
+        console.log('✔️ Conversation marked as read:', data.conversation_id);
         const conv = this.conversations.get(data.conversation_id);
         if (conv) {
             conv.unread = 0;
@@ -112,7 +122,80 @@ class InfinitixControlPanel {
     }
 
     setupEventListeners() {
-        // Reserved for future event listeners
+        // Info button click handler
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.action-btn[title="Información"]') || e.target.closest('.action-btn[title="Information"]')) {
+                console.log('🔘 Info button clicked');
+                this.showConversationInfo();
+            }
+        });
+
+        console.log('✅ Event listeners setup complete');
+    }
+
+    showConversationInfo() {
+        if (!this.currentConversationId) {
+            console.log('⚠️ No conversation selected');
+            return;
+        }
+
+        const conversation = this.conversations.get(this.currentConversationId);
+        if (!conversation) {
+            console.log('⚠️ Conversation not found:', this.currentConversationId);
+            return;
+        }
+
+        console.log('📊 Showing conversation info:', conversation);
+
+        // Build info panel content
+        const sessions = conversation.sessions || [];
+        const sessionsHtml = sessions.map(s => `
+            <div class="info-session">
+                <strong>Sesión #${s.session_id}</strong>
+                <div>Teléfono: ${s.phone_number}</div>
+                <div>Iniciada: ${new Date(s.started_at).toLocaleString('es-ES')}</div>
+                <div>Mensajes: ${s.message_count}</div>
+            </div>
+        `).join('');
+
+        const infoHtml = `
+            <div class="info-panel-overlay" id="infoPanelOverlay">
+                <div class="info-panel">
+                    <div class="info-header">
+                        <h3>Información de la Conversación</h3>
+                        <button class="info-close" onclick="document.getElementById('infoPanelOverlay').remove()">✕</button>
+                    </div>
+                    <div class="info-body">
+                        <div class="info-section">
+                            <h4>General</h4>
+                            <div><strong>ID:</strong> ${conversation.id}</div>
+                            <div><strong>Nombre:</strong> ${conversation.display_name}</div>
+                            ${conversation.customer_id ? `<div><strong>Customer ID:</strong> ${conversation.customer_id}</div>` : ''}
+                            ${conversation.user_id ? `<div><strong>User ID:</strong> ${conversation.user_id}</div>` : ''}
+                        </div>
+                        <div class="info-section">
+                            <h4>Estadísticas</h4>
+                            <div><strong>Total Mensajes:</strong> ${conversation.messages.length}</div>
+                            <div><strong>Total Sesiones:</strong> ${sessions.length}</div>
+                            <div><strong>Último mensaje:</strong> ${new Date(conversation.lastTimestamp).toLocaleString('es-ES')}</div>
+                        </div>
+                        <div class="info-section">
+                            <h4>Sesiones</h4>
+                            ${sessionsHtml || '<div>No hay sesiones registradas</div>'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Remove any existing info panel
+        const existing = document.getElementById('infoPanelOverlay');
+        if (existing) existing.remove();
+
+        // Add info panel to DOM
+        document.body.insertAdjacentHTML('beforeend', infoHtml);
+
+        console.log('✅ Info panel displayed');
     }
 
     updateConnectionStatus(connected) {
@@ -171,16 +254,23 @@ class InfinitixControlPanel {
         conversationList.querySelectorAll('.conversation-item').forEach(item => {
             item.addEventListener('click', () => {
                 const conversationId = item.dataset.id;
+                console.log(`👆 User clicked conversation: ${conversationId}`);
                 this.openConversation(conversationId);
             });
         });
     }
 
     openConversation(conversationId) {
+        console.log(`📂 Opening conversation: ${conversationId}`);
         this.currentConversationId = conversationId;
         const conversation = this.conversations.get(conversationId);
 
-        if (!conversation) return;
+        if (!conversation) {
+            console.log('⚠️ Conversation not found:', conversationId);
+            return;
+        }
+
+        console.log(`✅ Conversation loaded: ${conversation.display_name}, ${conversation.messages.length} messages`);
 
         this.showChatActive();
         this.renderChatHeader(conversation);
@@ -304,7 +394,20 @@ class InfinitixControlPanel {
     }
 
     formatTime(timestamp) {
+        // Validate timestamp
+        if (!timestamp || isNaN(timestamp)) {
+            console.log('⚠️ Invalid timestamp:', timestamp);
+            return '--';
+        }
+
         const date = new Date(timestamp);
+
+        // Check if date is valid
+        if (isNaN(date.getTime())) {
+            console.log('⚠️ Invalid date from timestamp:', timestamp);
+            return '--';
+        }
+
         const now = new Date();
         const diff = now - date;
 
@@ -330,7 +433,20 @@ class InfinitixControlPanel {
     }
 
     formatSessionTime(timestamp) {
+        // Validate timestamp
+        if (!timestamp || isNaN(timestamp)) {
+            console.log('⚠️ Invalid session timestamp:', timestamp);
+            return 'Fecha no disponible';
+        }
+
         const date = new Date(timestamp);
+
+        // Check if date is valid
+        if (isNaN(date.getTime())) {
+            console.log('⚠️ Invalid session date from timestamp:', timestamp);
+            return 'Fecha no disponible';
+        }
+
         const now = new Date();
         const isToday = date.toDateString() === now.toDateString();
 

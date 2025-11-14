@@ -80,17 +80,21 @@ class ProductionServer {
     const metadata = dbMessage.metadata || {};
     const customUserId = metadata.user_id || '';
     const fullName = metadata.full_name || '';
+    const customer_id = dbMessage.customer_id;
 
-    // Conversation identification logic:
-    // 1. If user_id provided (not empty): conversation_id = user_id
-    // 2. If user_id empty: conversation_id = "session_" + session_id
-    const conversationId = customUserId ? customUserId : `session_${dbMessage.session_id}`;
+    // Conversation identification logic (PRIORITY ORDER):
+    // 1. If customer_id exists: conversation_id = "customer_" + customer_id (HIGHEST PRIORITY - group all sessions for same customer)
+    // 2. Else if metadata.user_id provided: conversation_id = metadata.user_id
+    // 3. Else: conversation_id = "session_" + session_id
+    const conversationId = customer_id ? `customer_${customer_id}` : (customUserId ? customUserId : `session_${dbMessage.session_id}`);
 
-    // Display name priority: full_name > user_name > phone_number > session_id
+    console.log(`📊 Processing message: session=${dbMessage.session_id}, customer_id=${customer_id}, conv_id=${conversationId}`);
+
+    // Display name priority: full_name > customer_name > phone_number > session_id
     const displayName = fullName || dbMessage.user_name || dbMessage.user_id || `Session ${dbMessage.session_id}`;
 
     // Add user contact if not exists
-    const phoneNumber = dbMessage.user_id; // This is phone_number from chat_sessions_v2
+    const phoneNumber = dbMessage.user_id; // This is user_id (phone) from chat_sessions_v2
     if (!this.contacts.has(phoneNumber)) {
       this.contacts.set(phoneNumber, {
         user_id: phoneNumber,
@@ -111,11 +115,37 @@ class ProductionServer {
       });
     }
 
-    // Check if we need to merge conversations (migration from session_XXX to user_id)
+    // Check if we need to merge conversations
+    // Scenario 1: Migrate from session_XXX to customer_XXX when customer_id becomes available
     const sessionConvId = `session_${dbMessage.session_id}`;
-    if (customUserId && this.conversations.has(sessionConvId) && !this.conversations.has(customUserId)) {
-      // Migrate: Move all messages from session_XXX to user_id conversation
-      console.log(`🔀 Migrating conversation: ${sessionConvId} → ${customUserId}`);
+    if (customer_id && this.conversations.has(sessionConvId) && !this.conversations.has(conversationId)) {
+      console.log(`🔀 Migrating conversation: ${sessionConvId} → ${conversationId} (customer_id available)`);
+      const sessionConv = this.conversations.get(sessionConvId);
+
+      // Create new customer conversation with migrated messages
+      this.conversations.set(conversationId, {
+        id: conversationId,
+        display_name: displayName,
+        user_id: customUserId,
+        customer_id: customer_id,
+        sessions: [{
+          session_id: dbMessage.session_id,
+          started_at: sessionConv.messages.length > 0 ? sessionConv.messages[0].timestamp : Date.now(),
+          phone_number: phoneNumber,
+          message_count: sessionConv.messages.length
+        }],
+        messages: [...sessionConv.messages],
+        lastMessage: sessionConv.lastMessage,
+        lastTimestamp: sessionConv.lastTimestamp,
+        unread: sessionConv.unread
+      });
+
+      // Delete old session conversation
+      this.conversations.delete(sessionConvId);
+    }
+    // Scenario 2: Migrate from session_XXX to metadata user_id
+    else if (customUserId && !customer_id && this.conversations.has(sessionConvId) && !this.conversations.has(customUserId)) {
+      console.log(`🔀 Migrating conversation: ${sessionConvId} → ${customUserId} (metadata user_id)`);
       const sessionConv = this.conversations.get(sessionConvId);
 
       // Create new user conversation with migrated messages
@@ -123,6 +153,7 @@ class ProductionServer {
         id: customUserId,
         display_name: displayName,
         user_id: customUserId,
+        customer_id: null,
         sessions: [{
           session_id: dbMessage.session_id,
           started_at: sessionConv.messages.length > 0 ? sessionConv.messages[0].timestamp : Date.now(),
@@ -145,6 +176,7 @@ class ProductionServer {
         id: conversationId,
         display_name: displayName,
         user_id: customUserId || '',
+        customer_id: customer_id || null,
         sessions: [{
           session_id: dbMessage.session_id,
           started_at: dbMessage.timestamp,
@@ -314,11 +346,12 @@ class ProductionServer {
           });
         }
 
-        // Fetch session info from database to get user_id and customer_name
+        // Fetch session info from database to get user_id, customer_id and customer_name
         const sessionQuery = `
           SELECT
             id as session_id,
             user_id,
+            customer_id,
             customer_name
           FROM chat_sessions_v2
           WHERE id = $1
@@ -335,6 +368,7 @@ class ProductionServer {
 
         const session = sessionResult.rows[0];
         const phone_number = session.user_id;
+        const customer_id = session.customer_id;
         const user_name = session.customer_name;
 
         // Generate message_id if not provided
@@ -363,8 +397,8 @@ class ProductionServer {
 
         await database.insertMessage(messageData);
 
-        // Determine conversation ID using the new logic
-        const conversationId = user_id ? user_id : `session_${session_id}`;
+        // Determine conversation ID using customer_id if available, otherwise use metadata user_id or session_id
+        const conversationId = customer_id ? `customer_${customer_id}` : (user_id ? user_id : `session_${session_id}`);
 
         // Create DB message format for processing
         const dbMessage = {
@@ -375,6 +409,7 @@ class ProductionServer {
           bot_response: null,
           timestamp: Date.now(),
           user_id: phone_number,
+          customer_id: customer_id,
           user_name: user_name || phone_number,
           metadata: metadata
         };
@@ -436,6 +471,7 @@ class ProductionServer {
             cm.timestamp,
             cm.metadata,
             cs.user_id,
+            cs.customer_id,
             cs.customer_name as user_name
           FROM chat_messages_v2 cm
           JOIN chat_sessions_v2 cs ON cm.session_id = cs.id
@@ -480,9 +516,9 @@ class ProductionServer {
           });
         }
 
-        // Determine conversation ID using the new logic
+        // Determine conversation ID using customer_id if available, otherwise metadata user_id or session_id
         const customUserId = updatedMetadata.user_id || '';
-        const conversationId = customUserId ? customUserId : `session_${dbRow.session_id}`;
+        const conversationId = dbRow.customer_id ? `customer_${dbRow.customer_id}` : (customUserId ? customUserId : `session_${dbRow.session_id}`);
 
         // Create DB message format for processing
         const dbMessage = {
@@ -493,6 +529,7 @@ class ProductionServer {
           bot_response: message,
           timestamp: Date.now(),
           user_id: dbRow.user_id, // phone_number from database
+          customer_id: dbRow.customer_id,
           user_name: dbRow.user_name,
           metadata: updatedMetadata
         };
