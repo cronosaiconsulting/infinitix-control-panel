@@ -1,5 +1,7 @@
 // Production Server Module
-// Handles real webhook integrations and database synchronization
+// Handles real webhook integrations and database loading
+// - Database is read ONLY on initial load (page reload)
+// - Real-time updates come ONLY via webhooks (no periodic sync)
 
 const database = require('./database');
 
@@ -9,8 +11,7 @@ class ProductionServer {
     this.broadcast = broadcast;
     this.conversations = new Map();
     this.contacts = new Map();
-    this.lastSyncTimestamp = Date.now();
-    this.syncInterval = null;
+    this.lastSyncTimestamp = Date.now(); // Used for initial load only
   }
 
   // Initialize production mode
@@ -31,11 +32,11 @@ class ProductionServer {
       return false;
     }
 
-    // Load historical messages
+    // Load historical messages (only on server startup / page reload)
     await this.loadHistoricalMessages();
 
-    // Start periodic sync
-    this.startPeriodicSync();
+    // NOTE: No periodic sync - updates come ONLY via webhooks while interface is open
+    // Database is read ONLY on page reload to load historical messages
 
     // Setup production endpoints
     this.setupWebhookEndpoints();
@@ -277,59 +278,6 @@ class ProductionServer {
       addedUserMessage,
       addedBotMessage
     };
-  }
-
-  // Periodic sync with database
-  startPeriodicSync() {
-    const interval = parseInt(process.env.SYNC_INTERVAL || '30000'); // 30 seconds default
-    console.log(`🔄 Starting periodic sync (every ${interval / 1000}s)`);
-
-    this.syncInterval = setInterval(async () => {
-      try {
-        await this.syncWithDatabase();
-      } catch (error) {
-        console.error('❌ Sync error:', error);
-      }
-    }, interval);
-  }
-
-  // Sync new messages from database
-  async syncWithDatabase() {
-    try {
-      const newMessages = await database.getMessagesSince(this.lastSyncTimestamp);
-
-      if (newMessages.length > 0) {
-        console.log(`🔄 Synced ${newMessages.length} new messages from database`);
-
-        for (const dbMessage of newMessages) {
-          // Process message and get result
-          const result = this.processMessageFromDB(dbMessage);
-          const { conversationId, addedUserMessage, addedBotMessage } = result;
-
-          // Only broadcast if we actually added new messages (avoid duplicates)
-          if (addedUserMessage || addedBotMessage) {
-            const conversation = this.conversations.get(conversationId);
-
-            if (conversation) {
-              this.broadcast({
-                type: 'new_message',
-                data: {
-                  conversation_id: conversationId,
-                  message: conversation.messages[conversation.messages.length - 1],
-                  conversation: conversation
-                }
-              });
-            }
-          } else {
-            console.log(`⏭️ Sync: Message already exists - skipping broadcast to avoid duplicate`);
-          }
-        }
-
-        this.lastSyncTimestamp = Date.now();
-      }
-    } catch (error) {
-      console.error('❌ Failed to sync:', error);
-    }
   }
 
   // Setup webhook endpoints for n8n
