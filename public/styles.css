@@ -428,8 +428,8 @@ body {
     left: 0;
     top: 0;
     bottom: 0;
-    width: 4px;
-    background: linear-gradient(to right, var(--success-color), rgba(16, 185, 129, 0.3), transparent);
+    width: 8px;
+    background: linear-gradient(to right, var(--success-color), rgba(16, 185, 129, 0.5), rgba(16, 185, 129, 0.1), #ffffff);
     pointer-events: none;
 }
 

@@ -859,8 +859,8 @@ class InfinitixControlPanel {
         }
 
         try {
-            // Use new ticketer sound
-            const audio = new Audio('/ticketer-new-message.mp3');
+            // Use Google Pixel popcorn notification sound
+            const audio = new Audio('/google-pixel-popcorn-notification-sound.mp3');
             audio.volume = 0.3; // Set volume to 30%
             audio.play().catch(e => {
                 console.log('Audio playback failed:', e.message);
