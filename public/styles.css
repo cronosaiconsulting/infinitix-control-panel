@@ -256,53 +256,6 @@ body {
     font-weight: 600;
 }
 
-/* Statistics Widget */
-.stats-widget {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 0.75rem;
-    padding: 1rem;
-    background: var(--surface-color);
-    border-bottom: 1px solid var(--border-color);
-}
-
-.stat-card {
-    padding: 0.75rem;
-    border-radius: 0.5rem;
-    text-align: center;
-    color: white;
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.stat-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-}
-
-.stat-card-blue {
-    background: linear-gradient(135deg, #4f46e5, #4338ca);
-}
-
-.stat-card-orange {
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-}
-
-.stat-card-green {
-    background: linear-gradient(135deg, #10b981, #059669);
-}
-
-.stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
-}
-
-.stat-label {
-    font-size: 0.75rem;
-    opacity: 0.9;
-    font-weight: 500;
-}
-
 /* Search Container */
 .search-container {
     padding: 1rem;
@@ -448,22 +401,6 @@ body {
     scroll-behavior: smooth;
 }
 
-/* Smooth fade-in for conversation items */
-.conversation-item {
-    animation: fadeInConversation 0.2s ease;
-}
-
-@keyframes fadeInConversation {
-    from {
-        opacity: 0;
-        transform: translateY(-5px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
 .conversation-item {
     padding: 1rem 1.5rem;
     border-bottom: 1px solid var(--border-color);
@@ -478,6 +415,27 @@ body {
 .conversation-item.active {
     background: #eef2ff;
     border-left: 3px solid var(--primary-color);
+}
+
+/* Green vertical line indicator for unread messages */
+.conversation-item.has-unread {
+    position: relative;
+}
+
+.conversation-item.has-unread::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(to right, var(--success-color), rgba(16, 185, 129, 0.3), transparent);
+    pointer-events: none;
+}
+
+/* Active conversation overrides the unread indicator */
+.conversation-item.active.has-unread::before {
+    display: none;
 }
 
 .conversation-header {

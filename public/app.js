@@ -9,6 +9,7 @@ class InfinitixControlPanel {
         this.searchQuery = '';
         this.activeFilter = 'all';
         this.searchDebounceTimer = null;
+        this.lastSoundPlayedTime = 0;
         this.init();
     }
 
@@ -111,8 +112,8 @@ class InfinitixControlPanel {
             console.log('🔔 Message in different conversation - showing notification');
         }
 
-        // Play notification sound (optional)
-        this.playNotificationSound();
+        // Play notification sound for user messages
+        this.playNotificationSound(message);
     }
 
     handleConversationRead(data) {
@@ -374,9 +375,6 @@ class InfinitixControlPanel {
             sortedConversations = sortedConversations.filter(conv => conv.unread > 0);
         }
 
-        // Update statistics
-        this.updateStatistics(sortedConversations);
-
         if (sortedConversations.length === 0) {
             const emptyMessage = this.searchQuery ?
                 'No se encontraron conversaciones' :
@@ -398,7 +396,7 @@ class InfinitixControlPanel {
                 `<span class="session-count">${conv.sessions.length} sesiones</span>` : '';
 
             return `
-                <div class="conversation-item ${isActive ? 'active' : ''}" data-id="${conv.id}">
+                <div class="conversation-item ${isActive ? 'active' : ''} ${conv.unread > 0 ? 'has-unread' : ''}" data-id="${conv.id}">
                     <div class="conversation-header">
                         <span class="conversation-name">${this.escapeHtml(displayName)}</span>
                         <span class="conversation-time">${time}</span>
@@ -519,8 +517,8 @@ class InfinitixControlPanel {
             this.scrollToBottom();
         }
 
-        // Play sound
-        this.playNotificationSound();
+        // Play sound for user messages
+        this.playNotificationSound(message);
     }
 
     createMessageHTML(message) {
@@ -638,56 +636,6 @@ class InfinitixControlPanel {
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit'
-        });
-    }
-
-    updateStatistics(filteredConversations = null) {
-        // Use all conversations if no filtered list provided
-        const allConversations = Array.from(this.conversations.values());
-        const conversations = filteredConversations || allConversations;
-
-        // Calculate statistics
-        const total = allConversations.length;
-        const unread = allConversations.filter(c => c.unread > 0).length;
-
-        // Count conversations from today
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayTimestamp = today.getTime();
-        const todayCount = allConversations.filter(c => c.lastTimestamp >= todayTimestamp).length;
-
-        // Update DOM
-        const statTotal = document.getElementById('statTotal');
-        const statUnread = document.getElementById('statUnread');
-        const statToday = document.getElementById('statToday');
-
-        if (statTotal) statTotal.textContent = total;
-        if (statUnread) statUnread.textContent = unread;
-        if (statToday) statToday.textContent = todayCount;
-
-        // Update filter button counts
-        this.updateFilterCounts(total, unread);
-    }
-
-    updateFilterCounts(total, unread) {
-        const filterButtons = document.querySelectorAll('.filter-btn');
-        filterButtons.forEach(btn => {
-            const filter = btn.dataset.filter;
-            const countSpan = btn.querySelector('.filter-count');
-
-            // Create count span if it doesn't exist
-            if (!countSpan && (filter === 'all' || filter === 'unread')) {
-                const span = document.createElement('span');
-                span.className = 'filter-count';
-                btn.appendChild(span);
-            }
-
-            // Update count
-            const count = filter === 'all' ? total : filter === 'unread' ? unread : 0;
-            const updatedCountSpan = btn.querySelector('.filter-count');
-            if (updatedCountSpan) {
-                updatedCountSpan.textContent = count > 0 ? ` (${count})` : '';
-            }
         });
     }
 
@@ -897,14 +845,30 @@ class InfinitixControlPanel {
         return div.innerHTML;
     }
 
-    playNotificationSound() {
+    playNotificationSound(message) {
+        // Only play sound for user messages (not bot messages)
+        if (!message || message.user_id === '0') {
+            return;
+        }
+
+        // Throttle: Don't play sound if less than 2 seconds since last sound
+        const now = Date.now();
+        if (now - this.lastSoundPlayedTime < 2000) {
+            console.log('🔇 Sound throttled (less than 2 seconds since last sound)');
+            return;
+        }
+
         try {
-            // Use MP3 notification sound
-            const audio = new Audio('/new-notification-010-352755.mp3');
+            // Use new ticketer sound
+            const audio = new Audio('/ticketer-new-message.mp3');
             audio.volume = 0.3; // Set volume to 30%
             audio.play().catch(e => {
                 console.log('Audio playback failed:', e.message);
             });
+
+            // Update last played time
+            this.lastSoundPlayedTime = now;
+            console.log('🔔 Played notification sound for user message');
         } catch (e) {
             // Silently fail if audio not supported
             console.log('Audio not supported:', e.message);
