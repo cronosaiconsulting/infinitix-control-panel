@@ -6,12 +6,16 @@ class InfinitixControlPanel {
         this.conversations = new Map();
         this.contacts = new Map();
         this.currentConversationId = null;
+        this.searchQuery = '';
+        this.activeFilter = 'all';
+        this.searchDebounceTimer = null;
         this.init();
     }
 
     init() {
         this.setupWebSocket();
         this.setupEventListeners();
+        this.setupKeyboardShortcuts();
     }
 
     setupWebSocket() {
@@ -122,6 +126,74 @@ class InfinitixControlPanel {
     }
 
     setupEventListeners() {
+        // Search input handler with debouncing
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const value = e.target.value.toLowerCase();
+
+                // Show/hide clear button immediately
+                const clearBtn = document.getElementById('clearSearch');
+                if (clearBtn) {
+                    clearBtn.style.display = value ? 'flex' : 'none';
+                }
+
+                // Debounce the actual search
+                if (this.searchDebounceTimer) {
+                    clearTimeout(this.searchDebounceTimer);
+                }
+
+                this.searchDebounceTimer = setTimeout(() => {
+                    this.searchQuery = value;
+                    this.renderConversations();
+                }, 150); // 150ms debounce
+            });
+        }
+
+        // Clear search button
+        const clearSearch = document.getElementById('clearSearch');
+        if (clearSearch) {
+            clearSearch.addEventListener('click', () => {
+                const searchInput = document.getElementById('searchInput');
+                if (searchInput) {
+                    searchInput.value = '';
+                    this.searchQuery = '';
+                    clearSearch.style.display = 'none';
+                    this.renderConversations();
+                }
+            });
+        }
+
+        // Filter buttons
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                // Update active state
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+
+                // Update filter
+                this.activeFilter = e.target.dataset.filter;
+                this.renderConversations();
+            });
+        });
+
+        // Export button
+        const exportBtn = document.getElementById('exportBtn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                console.log('📥 Export button clicked');
+                this.exportConversation();
+            });
+        }
+
+        // Help button
+        const helpBtn = document.getElementById('helpBtn');
+        if (helpBtn) {
+            helpBtn.addEventListener('click', () => {
+                this.showKeyboardShortcuts();
+            });
+        }
+
         // Info button click handler
         document.addEventListener('click', (e) => {
             if (e.target.closest('.action-btn[title="Información"]') || e.target.closest('.action-btn[title="Information"]')) {
@@ -131,6 +203,69 @@ class InfinitixControlPanel {
         });
 
         console.log('✅ Event listeners setup complete');
+    }
+
+    setupKeyboardShortcuts() {
+        document.addEventListener('keydown', (e) => {
+            // Ctrl/Cmd + F - Focus search
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                e.preventDefault();
+                const searchInput = document.getElementById('searchInput');
+                if (searchInput) searchInput.focus();
+            }
+
+            // Ctrl/Cmd + E - Export current conversation
+            if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+                e.preventDefault();
+                if (this.currentConversationId) {
+                    this.exportConversation();
+                }
+            }
+
+            // Ctrl/Cmd + I - Show info panel
+            if ((e.ctrlKey || e.metaKey) && e.key === 'i') {
+                e.preventDefault();
+                if (this.currentConversationId) {
+                    this.showConversationInfo();
+                }
+            }
+
+            // Escape - Clear search or close panels
+            if (e.key === 'Escape') {
+                // Close shortcuts modal if open
+                const shortcutsOverlay = document.getElementById('shortcutsOverlay');
+                if (shortcutsOverlay) {
+                    shortcutsOverlay.remove();
+                    return;
+                }
+
+                // Close export modal if open
+                const exportModal = document.getElementById('exportModalOverlay');
+                if (exportModal) {
+                    exportModal.remove();
+                    return;
+                }
+
+                // Close info panel if open
+                const infoPanel = document.getElementById('infoPanelOverlay');
+                if (infoPanel) {
+                    infoPanel.remove();
+                    return;
+                }
+
+                // Clear search
+                const searchInput = document.getElementById('searchInput');
+                if (searchInput && searchInput.value) {
+                    searchInput.value = '';
+                    this.searchQuery = '';
+                    const clearBtn = document.getElementById('clearSearch');
+                    if (clearBtn) clearBtn.style.display = 'none';
+                    this.renderConversations();
+                }
+            }
+        });
+
+        console.log('✅ Keyboard shortcuts setup complete');
     }
 
     showConversationInfo() {
@@ -216,11 +351,39 @@ class InfinitixControlPanel {
         if (!conversationList) return;
 
         // Sort conversations by last message time
-        const sortedConversations = Array.from(this.conversations.values())
+        let sortedConversations = Array.from(this.conversations.values())
             .sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
+        // Apply search filter
+        if (this.searchQuery) {
+            sortedConversations = sortedConversations.filter(conv => {
+                const displayName = (conv.display_name || '').toLowerCase();
+                const lastMessage = (conv.lastMessage || '').toLowerCase();
+                const convId = (conv.id || '').toString().toLowerCase();
+                const userId = (conv.user_id || '').toString().toLowerCase();
+
+                return displayName.includes(this.searchQuery) ||
+                       lastMessage.includes(this.searchQuery) ||
+                       convId.includes(this.searchQuery) ||
+                       userId.includes(this.searchQuery);
+            });
+        }
+
+        // Apply unread filter
+        if (this.activeFilter === 'unread') {
+            sortedConversations = sortedConversations.filter(conv => conv.unread > 0);
+        }
+
+        // Update statistics
+        this.updateStatistics(sortedConversations);
+
         if (sortedConversations.length === 0) {
-            conversationList.innerHTML = '<div class="empty-state"><p>No hay conversaciones activas</p></div>';
+            const emptyMessage = this.searchQuery ?
+                'No se encontraron conversaciones' :
+                this.activeFilter === 'unread' ?
+                'No hay conversaciones sin leer' :
+                'No hay conversaciones activas';
+            conversationList.innerHTML = `<div class="empty-state"><p>${emptyMessage}</p></div>`;
             return;
         }
 
@@ -366,9 +529,12 @@ class InfinitixControlPanel {
         const time = this.formatTime(message.timestamp);
         const initial = contact.name.charAt(0).toUpperCase();
 
+        // For bot messages, use empty string (image will show via CSS)
+        const avatarContent = isBot ? '' : initial;
+
         return `
             <div class="message ${isBot ? 'bot' : 'user'}">
-                <div class="message-avatar">${initial}</div>
+                <div class="message-avatar">${avatarContent}</div>
                 <div class="message-content">
                     <div class="message-sender">${this.escapeHtml(contact.name)}</div>
                     <div class="message-bubble">${this.escapeHtml(message.message).replace(/\n/g, '<br>')}</div>
@@ -380,9 +546,13 @@ class InfinitixControlPanel {
 
     async markConversationAsRead(conversationId) {
         try {
-            await fetch(`/api/conversations/${conversationId}/read`, { method: 'POST' });
+            const response = await fetch(`/api/conversations/${conversationId}/read`, { method: 'POST' });
+            if (!response.ok) {
+                throw new Error('Failed to mark conversation as read');
+            }
         } catch (error) {
             console.error('Error marking conversation as read:', error);
+            // Don't show notification for this - it's a background operation
         }
     }
 
@@ -471,6 +641,256 @@ class InfinitixControlPanel {
         });
     }
 
+    updateStatistics(filteredConversations = null) {
+        // Use all conversations if no filtered list provided
+        const allConversations = Array.from(this.conversations.values());
+        const conversations = filteredConversations || allConversations;
+
+        // Calculate statistics
+        const total = allConversations.length;
+        const unread = allConversations.filter(c => c.unread > 0).length;
+
+        // Count conversations from today
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayTimestamp = today.getTime();
+        const todayCount = allConversations.filter(c => c.lastTimestamp >= todayTimestamp).length;
+
+        // Update DOM
+        const statTotal = document.getElementById('statTotal');
+        const statUnread = document.getElementById('statUnread');
+        const statToday = document.getElementById('statToday');
+
+        if (statTotal) statTotal.textContent = total;
+        if (statUnread) statUnread.textContent = unread;
+        if (statToday) statToday.textContent = todayCount;
+
+        // Update filter button counts
+        this.updateFilterCounts(total, unread);
+    }
+
+    updateFilterCounts(total, unread) {
+        const filterButtons = document.querySelectorAll('.filter-btn');
+        filterButtons.forEach(btn => {
+            const filter = btn.dataset.filter;
+            const countSpan = btn.querySelector('.filter-count');
+
+            // Create count span if it doesn't exist
+            if (!countSpan && (filter === 'all' || filter === 'unread')) {
+                const span = document.createElement('span');
+                span.className = 'filter-count';
+                btn.appendChild(span);
+            }
+
+            // Update count
+            const count = filter === 'all' ? total : filter === 'unread' ? unread : 0;
+            const updatedCountSpan = btn.querySelector('.filter-count');
+            if (updatedCountSpan) {
+                updatedCountSpan.textContent = count > 0 ? ` (${count})` : '';
+            }
+        });
+    }
+
+    exportConversation() {
+        if (!this.currentConversationId) {
+            console.log('⚠️ No conversation selected for export');
+            return;
+        }
+
+        const conversation = this.conversations.get(this.currentConversationId);
+        if (!conversation) {
+            console.log('⚠️ Conversation not found for export');
+            return;
+        }
+
+        console.log('📥 Exporting conversation:', conversation.id);
+
+        // Create export data
+        const exportData = {
+            conversation_id: conversation.id,
+            display_name: conversation.display_name,
+            user_id: conversation.user_id,
+            customer_id: conversation.customer_id,
+            exported_at: new Date().toISOString(),
+            total_messages: conversation.messages.length,
+            sessions: conversation.sessions || [],
+            messages: conversation.messages.map(msg => ({
+                timestamp: new Date(msg.timestamp).toISOString(),
+                user_id: msg.user_id,
+                sender: this.contacts.get(msg.user_id)?.name || `Usuario ${msg.user_id}`,
+                message: msg.message,
+                session_id: msg.session_id
+            }))
+        };
+
+        // Generate transcript text format
+        let transcript = `INFINITIX - EXPORTACIÓN DE CONVERSACIÓN\n`;
+        transcript += `===========================================\n\n`;
+        transcript += `Conversación: ${conversation.display_name}\n`;
+        transcript += `ID: ${conversation.id}\n`;
+        if (conversation.user_id) transcript += `Usuario: ${conversation.user_id}\n`;
+        if (conversation.customer_id) transcript += `Customer ID: ${conversation.customer_id}\n`;
+        transcript += `Total Mensajes: ${conversation.messages.length}\n`;
+        transcript += `Exportado: ${new Date().toLocaleString('es-ES')}\n`;
+        transcript += `\n===========================================\n\n`;
+
+        let lastSessionId = null;
+        conversation.messages.forEach(msg => {
+            // Add session separator
+            if (msg.session_id && msg.session_id !== lastSessionId) {
+                const session = conversation.sessions?.find(s => s.session_id === msg.session_id);
+                if (session) {
+                    transcript += `\n--- SESIÓN #${session.session_id} ---\n`;
+                    transcript += `Iniciada: ${new Date(session.started_at).toLocaleString('es-ES')}\n\n`;
+                }
+                lastSessionId = msg.session_id;
+            }
+
+            const time = new Date(msg.timestamp).toLocaleTimeString('es-ES');
+            const sender = this.contacts.get(msg.user_id)?.name || `Usuario ${msg.user_id}`;
+            transcript += `[${time}] ${sender}:\n${msg.message}\n\n`;
+        });
+
+        // Create download options modal
+        this.showExportModal(exportData, transcript, conversation.display_name);
+    }
+
+    showExportModal(exportData, transcript, conversationName) {
+        // Create modal HTML
+        const modalHtml = `
+            <div class="info-panel-overlay" id="exportModalOverlay" onclick="if(event.target.id==='exportModalOverlay') this.remove()">
+                <div class="info-panel" style="max-width: 500px;">
+                    <div class="info-header">
+                        <h3>Exportar Conversación</h3>
+                        <button class="info-close" onclick="document.getElementById('exportModalOverlay').remove()">✕</button>
+                    </div>
+                    <div class="info-body">
+                        <p style="margin-bottom: 1rem; color: var(--text-secondary);">
+                            Selecciona el formato de exportación para la conversación "${this.escapeHtml(conversationName)}".
+                        </p>
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                            <button class="export-format-btn" onclick="window.controlPanel.downloadExport('json', ${this.currentConversationId})">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M4 4h12v2H4V4zm0 4h12v2H4V8zm0 4h8v2H4v-2z"/>
+                                </svg>
+                                <div>
+                                    <strong>JSON</strong>
+                                    <small>Formato estructurado con todos los datos</small>
+                                </div>
+                            </button>
+                            <button class="export-format-btn" onclick="window.controlPanel.downloadExport('txt', ${this.currentConversationId})">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M4 2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2zm1 3v2h10V5H5zm0 4v2h10V9H5zm0 4v2h7v-2H5z"/>
+                                </svg>
+                                <div>
+                                    <strong>TXT</strong>
+                                    <small>Transcripción legible en texto plano</small>
+                                </div>
+                            </button>
+                            <button class="export-format-btn" onclick="window.controlPanel.downloadExport('csv', ${this.currentConversationId})">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M3 3h14a1 1 0 011 1v12a1 1 0 01-1 1H3a1 1 0 01-1-1V4a1 1 0 011-1zm1 2v2h12V5H4zm0 4v2h12V9H4zm0 4v2h12v-2H4z"/>
+                                </svg>
+                                <div>
+                                    <strong>CSV</strong>
+                                    <small>Formato tabular para Excel/Sheets</small>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Remove existing modal
+        const existing = document.getElementById('exportModalOverlay');
+        if (existing) existing.remove();
+
+        // Add modal to DOM
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        // Store export data temporarily
+        this._exportData = exportData;
+        this._exportTranscript = transcript;
+
+        console.log('✅ Export modal displayed');
+    }
+
+    downloadExport(format, conversationId) {
+        const conversation = this.conversations.get(conversationId);
+        if (!conversation) {
+            console.error('Conversation not found for export');
+            return;
+        }
+
+        // Null safety checks
+        if (!conversation.messages || conversation.messages.length === 0) {
+            this.showNotification('No hay mensajes para exportar', 'error');
+            const modal = document.getElementById('exportModalOverlay');
+            if (modal) modal.remove();
+            return;
+        }
+
+        let content, filename, mimeType;
+        const displayName = conversation.display_name || `Conversacion_${conversationId}`;
+        const sanitizedName = displayName.replace(/[^a-zA-Z0-9]/g, '_');
+        const timestamp = new Date().toISOString().split('T')[0];
+
+        switch (format) {
+            case 'json':
+                content = JSON.stringify(this._exportData, null, 2);
+                filename = `conversacion_${sanitizedName}_${timestamp}.json`;
+                mimeType = 'application/json';
+                break;
+
+            case 'txt':
+                content = this._exportTranscript;
+                filename = `conversacion_${sanitizedName}_${timestamp}.txt`;
+                mimeType = 'text/plain';
+                break;
+
+            case 'csv':
+                // Create CSV format
+                content = 'Timestamp,Fecha,Hora,Usuario,Remitente,Mensaje,Sesion\n';
+                conversation.messages.forEach(msg => {
+                    const date = new Date(msg.timestamp);
+                    const sender = this.contacts.get(msg.user_id)?.name || `Usuario ${msg.user_id}`;
+                    const message = msg.message.replace(/"/g, '""'); // Escape quotes
+                    content += `${msg.timestamp},"${date.toLocaleDateString('es-ES')}","${date.toLocaleTimeString('es-ES')}","${msg.user_id}","${sender}","${message}","${msg.session_id || ''}"\n`;
+                });
+                filename = `conversacion_${sanitizedName}_${timestamp}.csv`;
+                mimeType = 'text/csv';
+                break;
+
+            default:
+                return;
+        }
+
+        // Create and trigger download
+        const blob = new Blob([content], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        console.log(`✅ Downloaded ${format.toUpperCase()} export: ${filename}`);
+
+        // Show success notification
+        this.showNotification(`Conversación exportada exitosamente como ${format.toUpperCase()}`, 'success');
+
+        // Clean up export data
+        this._exportData = null;
+        this._exportTranscript = null;
+
+        // Close modal
+        const modal = document.getElementById('exportModalOverlay');
+        if (modal) modal.remove();
+    }
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
@@ -489,6 +909,78 @@ class InfinitixControlPanel {
             // Silently fail if audio not supported
             console.log('Audio not supported:', e.message);
         }
+    }
+
+    showKeyboardShortcuts() {
+        const shortcuts = [
+            { keys: 'Ctrl/Cmd + F', description: 'Buscar conversaciones' },
+            { keys: 'Ctrl/Cmd + E', description: 'Exportar conversación actual' },
+            { keys: 'Ctrl/Cmd + I', description: 'Ver información de conversación' },
+            { keys: 'Esc', description: 'Cerrar paneles o limpiar búsqueda' }
+        ];
+
+        const shortcutsHtml = shortcuts.map(s => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem; border-bottom: 1px solid var(--border-color);">
+                <span style="color: var(--text-secondary);">${s.description}</span>
+                <kbd style="background: var(--bg-color); padding: 0.25rem 0.5rem; border-radius: 0.25rem; border: 1px solid var(--border-color); font-family: monospace; font-size: 0.875rem;">${s.keys}</kbd>
+            </div>
+        `).join('');
+
+        const modalHtml = `
+            <div class="info-panel-overlay" id="shortcutsOverlay" onclick="if(event.target.id==='shortcutsOverlay') this.remove()">
+                <div class="info-panel" style="max-width: 500px;">
+                    <div class="info-header">
+                        <h3>Atajos de Teclado</h3>
+                        <button class="info-close" onclick="document.getElementById('shortcutsOverlay').remove()">✕</button>
+                    </div>
+                    <div class="info-body" style="padding: 0;">
+                        ${shortcutsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Remove existing modal
+        const existing = document.getElementById('shortcutsOverlay');
+        if (existing) existing.remove();
+
+        // Add modal to DOM
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+    }
+
+    showNotification(message, type = 'info', duration = 3000) {
+        // Remove existing notifications
+        document.querySelectorAll('.notification-toast').forEach(n => n.remove());
+
+        // Create notification element
+        const notification = document.createElement('div');
+        notification.className = `notification-toast ${type}`;
+
+        // Icon based on type
+        let icon = '';
+        switch (type) {
+            case 'success':
+                icon = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" style="color: var(--success-color);"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>';
+                break;
+            case 'error':
+                icon = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" style="color: var(--danger-color);"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/></svg>';
+                break;
+            default:
+                icon = '<svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" style="color: var(--primary-color);"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg>';
+        }
+
+        notification.innerHTML = `
+            ${icon}
+            <span>${message}</span>
+        `;
+
+        document.body.appendChild(notification);
+
+        // Auto remove after duration
+        setTimeout(() => {
+            notification.style.animation = 'slideInRight 0.3s ease reverse';
+            setTimeout(() => notification.remove(), 300);
+        }, duration);
     }
 }
 

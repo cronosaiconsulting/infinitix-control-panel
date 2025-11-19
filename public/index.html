@@ -12,14 +12,17 @@
         <header class="app-header">
             <div class="header-content">
                 <div class="logo">
-                    <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-                        <circle cx="16" cy="16" r="15" stroke="#4f46e5" stroke-width="2"/>
-                        <path d="M16 8 L16 24 M10 16 L22 16" stroke="#4f46e5" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
+                    <img src="/Logo_OCC_SPORT_PLUS.png" alt="OCC Sport Plus" class="logo-image">
+                    <div class="logo-divider"></div>
                     <h1>Infinitix Control Panel</h1>
                 </div>
                 <div class="header-info">
                     <span class="company-name">OCC Sport Plus</span>
+                    <button class="help-btn" id="helpBtn" title="Atajos de teclado">
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+                        </svg>
+                    </button>
                     <span class="connection-status" id="connectionStatus">
                         <span class="status-dot"></span>
                         Conectando...
@@ -35,6 +38,42 @@
                 <div class="sidebar-header">
                     <h2>Conversaciones</h2>
                 </div>
+
+                <!-- Statistics Widget -->
+                <div class="stats-widget" id="statsWidget">
+                    <div class="stat-card stat-card-blue">
+                        <div class="stat-value" id="statTotal">0</div>
+                        <div class="stat-label">Total</div>
+                    </div>
+                    <div class="stat-card stat-card-orange">
+                        <div class="stat-value" id="statUnread">0</div>
+                        <div class="stat-label">Sin leer</div>
+                    </div>
+                    <div class="stat-card stat-card-green">
+                        <div class="stat-value" id="statToday">0</div>
+                        <div class="stat-label">Hoy</div>
+                    </div>
+                </div>
+
+                <!-- Search Bar -->
+                <div class="search-container">
+                    <div class="search-input-wrapper">
+                        <svg class="search-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
+                        </svg>
+                        <input type="text" id="searchInput" placeholder="Buscar conversaciones..." class="search-input">
+                        <button id="clearSearch" class="clear-search" style="display: none;">
+                            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                                <path d="M14 1.41L12.59 0L7 5.59L1.41 0L0 1.41L5.59 7L0 12.59L1.41 14L7 8.41L12.59 14L14 12.59L8.41 7L14 1.41Z"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-filter="all">Todas</button>
+                        <button class="filter-btn" data-filter="unread">Sin leer</button>
+                    </div>
+                </div>
+
                 <div class="conversation-list" id="conversationList">
                     <div class="empty-state">
                         <p>No hay conversaciones activas</p>
@@ -64,6 +103,11 @@
                             </div>
                         </div>
                         <div class="chat-actions">
+                            <button class="action-btn" id="exportBtn" title="Exportar conversación">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M13 8V2H7v6H2l8 8 8-8h-5zM0 18h20v2H0v-2z"/>
+                                </svg>
+                            </button>
                             <button class="action-btn" title="Información">
                                 <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
                                     <path d="M10 2a8 8 0 100 16 8 8 0 000-16zM9 9h2v6H9V9zm0-4h2v2H9V5z"/>
