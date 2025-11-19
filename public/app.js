@@ -72,6 +72,9 @@ class InfinitixControlPanel {
         // Initialize with existing conversations
         data.conversations.forEach(conv => {
             this.conversations.set(conv.id, conv);
+            if (conv.unread > 0) {
+                console.log(`   📬 Conversation ${conv.id} has ${conv.unread} unread messages on init`);
+            }
         });
 
         data.contacts.forEach(contact => {
@@ -93,6 +96,7 @@ class InfinitixControlPanel {
         const { conversation_id, message, conversation } = data;
 
         console.log(`💬 New message in conversation ${conversation_id}:`, message.message?.substring(0, 50));
+        console.log(`   Conversation unread count:`, conversation.unread, `(type: ${typeof conversation.unread})`);
 
         // Update conversation
         this.conversations.set(conversation_id, conversation);
@@ -355,6 +359,10 @@ class InfinitixControlPanel {
         let sortedConversations = Array.from(this.conversations.values())
             .sort((a, b) => b.lastTimestamp - a.lastTimestamp);
 
+        // Debug: Log unread counts
+        const totalUnread = sortedConversations.filter(c => c.unread > 0).length;
+        console.log(`📊 Rendering ${sortedConversations.length} conversations, ${totalUnread} with unread messages`);
+
         // Apply search filter
         if (this.searchQuery) {
             sortedConversations = sortedConversations.filter(conv => {
@@ -390,6 +398,11 @@ class InfinitixControlPanel {
             const displayName = conv.display_name || (this.contacts.get(conv.user_id) || { name: `Usuario ${conv.id}` }).name;
             const time = this.formatTime(conv.lastTimestamp);
             const isActive = this.currentConversationId === conv.id;
+
+            // Debug: Log unread status for each conversation
+            if (conv.unread > 0) {
+                console.log(`🔴 Conv ${conv.id} (${displayName}): unread=${conv.unread}, typeof=${typeof conv.unread}`);
+            }
 
             // Show session count if multiple sessions
             const sessionInfo = conv.sessions && conv.sessions.length > 1 ?
@@ -568,11 +581,13 @@ class InfinitixControlPanel {
             return '--';
         }
 
-        const date = new Date(timestamp);
+        // Convert to integer to handle timestamps with microseconds from PostgreSQL
+        const timestampMs = Math.floor(Number(timestamp));
+        const date = new Date(timestampMs);
 
         // Check if date is valid
         if (isNaN(date.getTime())) {
-            console.log('⚠️ Invalid date from timestamp:', timestamp);
+            console.log('⚠️ Invalid date from timestamp:', timestamp, 'converted to:', timestampMs);
             return '--';
         }
 
