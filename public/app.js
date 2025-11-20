@@ -104,11 +104,10 @@ class InfinitixControlPanel {
         // Update conversations list
         this.renderConversations();
 
-        // If this is the current conversation, add message to chat
+        // If this is the current conversation, re-render all messages to avoid duplication
         if (this.currentConversationId === conversation_id) {
-            console.log('📝 Adding message to current conversation');
-            this.renderMessage(message);
-            this.scrollToBottom();
+            console.log('📝 Re-rendering current conversation with new message');
+            this.renderMessages(conversation);
 
             // Mark as read
             this.markConversationAsRead(conversation_id);
@@ -622,11 +621,13 @@ class InfinitixControlPanel {
             return 'Fecha no disponible';
         }
 
-        const date = new Date(timestamp);
+        // Convert to integer to handle timestamps with microseconds from PostgreSQL
+        const timestampMs = Math.floor(Number(timestamp));
+        const date = new Date(timestampMs);
 
         // Check if date is valid
         if (isNaN(date.getTime())) {
-            console.log('⚠️ Invalid session date from timestamp:', timestamp);
+            console.log('⚠️ Invalid session date from timestamp:', timestamp, 'converted to:', timestampMs);
             return 'Fecha no disponible';
         }
 

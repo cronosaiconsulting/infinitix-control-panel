@@ -243,19 +243,6 @@ body {
     flex-direction: column;
 }
 
-.sidebar-header {
-    padding: 1.5rem;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.sidebar-header h2 {
-    font-size: 1.25rem;
-    font-weight: 600;
-}
-
 /* Search Container */
 .search-container {
     padding: 1rem;
