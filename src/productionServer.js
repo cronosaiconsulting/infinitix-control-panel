@@ -77,7 +77,8 @@ class ProductionServer {
 
   // Process a message from database
   // Note: DB row contains BOTH user_message and bot_response
-  processMessageFromDB(dbMessage) {
+  // @param {boolean} isRealtime - If true, increment unread for user messages (webhook). If false, don't increment (initial load)
+  processMessageFromDB(dbMessage, isRealtime = false) {
     const metadata = dbMessage.metadata || {};
     const customUserId = metadata.user_id || '';
     const fullName = metadata.full_name || '';
@@ -235,6 +236,11 @@ class ProductionServer {
         conversation.lastMessage = dbMessage.user_message;
         conversation.lastTimestamp = dbMessage.timestamp;
 
+        // Increment unread count for user messages (only for real-time webhook messages, not initial load)
+        if (isRealtime) {
+          conversation.unread = (conversation.unread || 0) + 1;
+        }
+
         // Update session message count
         const session = conversation.sessions.find(s => s.session_id === dbMessage.session_id);
         if (session) session.message_count++;
@@ -369,8 +375,8 @@ class ProductionServer {
           metadata: metadata
         };
 
-        // Process message and get result
-        const result = this.processMessageFromDB(dbMessage);
+        // Process message and get result (isRealtime = true to increment unread)
+        const result = this.processMessageFromDB(dbMessage, true);
         const { conversationId, addedUserMessage } = result;
 
         // Only broadcast if we actually added a new message (avoid duplicates)
