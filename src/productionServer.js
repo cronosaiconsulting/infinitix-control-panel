@@ -220,8 +220,11 @@ class ProductionServer {
 
     // Add user message
     if (dbMessage.user_message) {
+      // Use message_id for stable duplicate detection across webhook retries
+      const messageId = dbMessage.message_id ? `${dbMessage.message_id}_user` : `${dbMessage.timestamp}_user_${dbMessage.id}`;
+
       const userMessage = {
-        id: `${dbMessage.timestamp}_user_${dbMessage.id}`,
+        id: messageId,
         user_id: phoneNumber,
         message: dbMessage.user_message,
         timestamp: dbMessage.timestamp,
@@ -251,8 +254,11 @@ class ProductionServer {
 
     // Add bot response (if exists)
     if (dbMessage.bot_response) {
+      // Use message_id for stable duplicate detection across webhook retries
+      const messageId = dbMessage.message_id ? `${dbMessage.message_id}_bot` : `${dbMessage.timestamp}_bot_${dbMessage.id}`;
+
       const botMessage = {
-        id: `${dbMessage.timestamp}_bot_${dbMessage.id}`,
+        id: messageId,
         user_id: '0', // Bot user_id
         message: dbMessage.bot_response,
         timestamp: dbMessage.timestamp + 1, // +1ms to ensure bot message comes after user
