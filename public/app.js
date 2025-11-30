@@ -376,11 +376,45 @@ class InfinitixControlPanel {
             return;
         }
 
-        // Get wa_id (phone number) and session_id
+        // Get wa_id (phone number) and session_id from the active session
         const sessions = conversation.sessions || [];
-        const latestSession = sessions[sessions.length - 1];
-        const wa_id = latestSession?.phone_number || conversation.user_id;
-        const session_id = latestSession?.session_id;
+
+        // Helper: Check if value looks like a valid phone number (not UUID)
+        const isValidPhoneNumber = (value) => {
+            if (!value) return false;
+            // UUID pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+            const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (uuidPattern.test(value)) return false;
+            // Phone number: digits, possibly with + prefix
+            const phonePattern = /^\+?\d{6,}$/;
+            return phonePattern.test(value);
+        };
+
+        // Find the best session: prefer one with valid wa_id, then most recent by started_at
+        let activeSession = null;
+
+        // First, try to find a session with a valid wa_id (actual phone number)
+        const sessionsWithValidWaId = sessions.filter(s =>
+            isValidPhoneNumber(s.wa_id) || isValidPhoneNumber(s.phone_number)
+        );
+
+        if (sessionsWithValidWaId.length > 0) {
+            // Sort by started_at descending to get the most recent
+            activeSession = sessionsWithValidWaId.sort((a, b) =>
+                (b.started_at || 0) - (a.started_at || 0)
+            )[0];
+        } else {
+            // Fallback: get the most recent session by started_at
+            activeSession = [...sessions].sort((a, b) =>
+                (b.started_at || 0) - (a.started_at || 0)
+            )[0];
+        }
+
+        // Extract wa_id: prefer wa_id field, then phone_number, then user_id
+        const wa_id = activeSession?.wa_id || activeSession?.phone_number || conversation.user_id;
+        const session_id = activeSession?.session_id;
+
+        console.log('📤 Sending message - Active session:', activeSession?.session_id, 'wa_id:', wa_id);
 
         this.isSendingMessage = true;
         const chatInput = document.getElementById('chatInput');
