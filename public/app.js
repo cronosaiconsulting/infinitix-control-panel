@@ -382,39 +382,63 @@ class InfinitixControlPanel {
         // Helper: Check if value looks like a valid phone number (not UUID)
         const isValidPhoneNumber = (value) => {
             if (!value) return false;
+            // Convert to string for regex testing (handles numbers)
+            const strValue = String(value);
             // UUID pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
             const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (uuidPattern.test(value)) return false;
+            if (uuidPattern.test(strValue)) return false;
             // Phone number: digits, possibly with + prefix
             const phonePattern = /^\+?\d{6,}$/;
-            return phonePattern.test(value);
+            return phonePattern.test(strValue);
         };
 
-        // Find the best session: prefer one with valid wa_id, then most recent by started_at
+        // Helper: Get valid phone from session
+        const getValidPhone = (session) => {
+            if (isValidPhoneNumber(session.wa_id)) return String(session.wa_id);
+            if (isValidPhoneNumber(session.phone_number)) return String(session.phone_number);
+            return null;
+        };
+
+        // Debug: Log all sessions
+        console.log('📋 All sessions:', sessions.map(s => ({
+            id: s.session_id,
+            wa_id: s.wa_id,
+            phone: s.phone_number,
+            validPhone: getValidPhone(s),
+            started_at: s.started_at
+        })));
+
+        // Find the best session: MUST have valid phone number for WhatsApp
         let activeSession = null;
 
         // First, try to find a session with a valid wa_id (actual phone number)
-        const sessionsWithValidWaId = sessions.filter(s =>
-            isValidPhoneNumber(s.wa_id) || isValidPhoneNumber(s.phone_number)
-        );
+        const sessionsWithValidPhone = sessions.filter(s => getValidPhone(s) !== null);
 
-        if (sessionsWithValidWaId.length > 0) {
-            // Sort by started_at descending to get the most recent
-            activeSession = sessionsWithValidWaId.sort((a, b) =>
-                (b.started_at || 0) - (a.started_at || 0)
-            )[0];
+        console.log('📋 Sessions with valid phone:', sessionsWithValidPhone.length);
+
+        if (sessionsWithValidPhone.length > 0) {
+            // Sort by: 1) started_at descending, 2) session_id descending (as tiebreaker)
+            activeSession = sessionsWithValidPhone.sort((a, b) => {
+                const timeDiff = (b.started_at || 0) - (a.started_at || 0);
+                if (timeDiff !== 0) return timeDiff;
+                // Tiebreaker: higher session_id = more recent
+                return (b.session_id || 0) - (a.session_id || 0);
+            })[0];
         } else {
-            // Fallback: get the most recent session by started_at
-            activeSession = [...sessions].sort((a, b) =>
-                (b.started_at || 0) - (a.started_at || 0)
-            )[0];
+            // Fallback: get the most recent session by started_at/session_id
+            activeSession = [...sessions].sort((a, b) => {
+                const timeDiff = (b.started_at || 0) - (a.started_at || 0);
+                if (timeDiff !== 0) return timeDiff;
+                return (b.session_id || 0) - (a.session_id || 0);
+            })[0];
         }
 
-        // Extract wa_id: prefer wa_id field, then phone_number, then user_id
-        const wa_id = activeSession?.wa_id || activeSession?.phone_number || conversation.user_id;
+        // Extract wa_id: prefer valid phone, then wa_id field, then phone_number, then user_id
+        const validPhone = activeSession ? getValidPhone(activeSession) : null;
+        const wa_id = validPhone || activeSession?.wa_id || activeSession?.phone_number || conversation.user_id;
         const session_id = activeSession?.session_id;
 
-        console.log('📤 Sending message - Active session:', activeSession?.session_id, 'wa_id:', wa_id);
+        console.log('📤 Sending message - Active session:', session_id, 'wa_id:', wa_id, 'validPhone:', validPhone);
 
         this.isSendingMessage = true;
         const chatInput = document.getElementById('chatInput');
