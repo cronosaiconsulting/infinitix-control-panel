@@ -133,10 +133,10 @@ class Database {
   async updateManualMessageStatus(id, status, webhookResponse = null, errorMessage = null) {
     const query = `
       UPDATE manual_messages
-      SET status = $1,
+      SET status = $1::VARCHAR,
           webhook_response = $2,
           error_message = $3,
-          sent_at = CASE WHEN $1 = 'sent' THEN NOW() ELSE sent_at END
+          sent_at = CASE WHEN $1::VARCHAR = 'sent' THEN NOW() ELSE sent_at END
       WHERE id = $4
       RETURNING *
     `;

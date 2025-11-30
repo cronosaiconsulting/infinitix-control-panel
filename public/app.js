@@ -304,7 +304,51 @@ class InfinitixControlPanel {
             });
         }
 
+        // Scroll to bottom button
+        const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+        if (scrollToBottomBtn) {
+            scrollToBottomBtn.addEventListener('click', () => {
+                this.scrollToBottom();
+            });
+        }
+
+        // Setup scroll detection for scroll-to-bottom button visibility
+        this.setupScrollToBottomDetection();
+
         console.log('✅ Event listeners setup complete');
+    }
+
+    // Setup scroll detection to show/hide scroll-to-bottom button
+    setupScrollToBottomDetection() {
+        const chatMessages = document.getElementById('chatMessages');
+        const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+
+        if (!chatMessages || !scrollToBottomBtn) return;
+
+        // Scroll handler to show/hide button
+        const handleScroll = () => {
+            const { scrollTop, scrollHeight, clientHeight } = chatMessages;
+            const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+            // Show button if user has scrolled up more than 200px from bottom
+            if (distanceFromBottom > 200) {
+                scrollToBottomBtn.classList.add('visible');
+            } else {
+                scrollToBottomBtn.classList.remove('visible');
+            }
+        };
+
+        // Remove existing listener if any
+        if (chatMessages._scrollToBottomHandler) {
+            chatMessages.removeEventListener('scroll', chatMessages._scrollToBottomHandler);
+        }
+
+        // Store and add new listener
+        chatMessages._scrollToBottomHandler = handleScroll;
+        chatMessages.addEventListener('scroll', handleScroll);
+
+        // Initial check
+        handleScroll();
     }
 
     // Send manual message via API
@@ -565,6 +609,12 @@ class InfinitixControlPanel {
                 if (this.currentConversationId) {
                     this.showConversationInfo();
                 }
+            }
+
+            // End key - Scroll to bottom of messages
+            if (e.key === 'End' && this.currentConversationId) {
+                e.preventDefault();
+                this.scrollToBottom();
             }
 
             // Escape - Clear search or close panels
@@ -1041,9 +1091,12 @@ class InfinitixControlPanel {
         // Setup scroll detection for auto-loading
         this.setupScrollLoadDetection(conversation);
 
-        // Scroll to bottom on initial load, preserve position on load more
+        // Setup scroll-to-bottom button detection
+        this.setupScrollToBottomDetection();
+
+        // Scroll to bottom on initial load (without animation), preserve position on load more
         if (!appendOlder) {
-            this.scrollToBottom();
+            this.scrollToBottom(false); // Use instant scroll on initial load
         }
     }
 
@@ -1205,10 +1258,25 @@ class InfinitixControlPanel {
         }
     }
 
-    scrollToBottom() {
+    scrollToBottom(smooth = true) {
         const chatMessages = document.getElementById('chatMessages');
         if (chatMessages) {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            if (smooth) {
+                chatMessages.scrollTo({
+                    top: chatMessages.scrollHeight,
+                    behavior: 'smooth'
+                });
+            } else {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        }
+
+        // Hide scroll-to-bottom button after scrolling
+        const scrollToBottomBtn = document.getElementById('scrollToBottomBtn');
+        if (scrollToBottomBtn) {
+            setTimeout(() => {
+                scrollToBottomBtn.classList.remove('visible');
+            }, 300);
         }
     }
 
@@ -1555,6 +1623,7 @@ class InfinitixControlPanel {
             { keys: 'Ctrl/Cmd + F', description: 'Buscar conversaciones' },
             { keys: 'Ctrl/Cmd + E', description: 'Exportar conversación actual' },
             { keys: 'Ctrl/Cmd + I', description: 'Ver información de conversación' },
+            { keys: 'End', description: 'Ir al final de los mensajes' },
             { keys: 'Esc', description: 'Cerrar paneles o limpiar búsqueda' }
         ];
 

@@ -137,8 +137,17 @@
                         </div>
                     </div>
 
-                    <div class="chat-messages" id="chatMessages">
-                        <!-- Messages will be inserted here -->
+                    <div class="chat-messages-wrapper">
+                        <div class="chat-messages" id="chatMessages">
+                            <!-- Messages will be inserted here -->
+                        </div>
+                        <!-- Scroll to Bottom Button -->
+                        <button class="scroll-to-bottom-btn" id="scrollToBottomBtn" title="Ir al final">
+                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                                <path class="scroll-arrow" d="M10 4 L10 14 M5 10 L10 15 L15 10" />
+                                <line class="scroll-line" x1="5" y1="17" x2="15" y2="17" />
+                            </svg>
+                        </button>
                     </div>
 
                     <!-- Input Area with 24h Window Logic -->
