@@ -11,6 +11,13 @@ class InfinitixControlPanel {
         this.sourceFilter = 'all'; // 'all', 'whatsapp', 'web'
         this.searchDebounceTimer = null;
         this.lastSoundPlayedTime = 0;
+
+        // Message pagination
+        this.messagesPerPage = 50; // Initial messages to show
+        this.messagesLoadIncrement = 10; // Messages to load when scrolling up
+        this.displayedMessageCount = 0; // Current number of displayed messages
+        this.isLoadingMoreMessages = false; // Prevent multiple simultaneous loads
+
         this.init();
     }
 
@@ -681,20 +688,63 @@ class InfinitixControlPanel {
         document.getElementById('userId').textContent = subtitle;
     }
 
-    renderMessages(conversation) {
+    renderMessages(conversation, appendOlder = false) {
         const chatMessages = document.getElementById('chatMessages');
         if (!chatMessages) return;
 
+        const allMessages = conversation.messages || [];
+        const totalMessages = allMessages.length;
+
+        // Determine how many messages to show
+        if (!appendOlder) {
+            // Initial load: show last N messages
+            this.displayedMessageCount = Math.min(this.messagesPerPage, totalMessages);
+        }
+
+        // Get the messages to display (from the end)
+        const startIndex = Math.max(0, totalMessages - this.displayedMessageCount);
+        const messagesToShow = allMessages.slice(startIndex);
+
+        // Check if there are more messages to load
+        const hasMoreMessages = startIndex > 0;
+
         let html = '';
+
+        // Add "Load more" button at the top if there are older messages
+        if (hasMoreMessages) {
+            const remainingCount = startIndex;
+            html += `
+                <div class="load-more-container" id="loadMoreContainer">
+                    <button class="load-more-btn" id="loadMoreBtn">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+                            <path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM1 8a7 7 0 1 1 14 0A7 7 0 0 1 1 8z"/>
+                        </svg>
+                        Cargar mensajes anteriores (${remainingCount} más)
+                    </button>
+                </div>
+            `;
+        }
+
+        // Add loading indicator (hidden by default)
+        html += `
+            <div class="loading-messages" id="loadingMessages" style="display: none;">
+                <div class="loading-spinner"></div>
+                <span>Cargando mensajes anteriores...</span>
+            </div>
+        `;
+
         let lastSessionId = null;
 
-        conversation.messages.forEach((msg, index) => {
+        messagesToShow.forEach((msg, index) => {
+            const actualIndex = startIndex + index;
+
             // Check if session changed - insert session banner
             if (msg.session_id && msg.session_id !== lastSessionId) {
                 // Find session info
                 const session = conversation.sessions && conversation.sessions.find(s => s.session_id === msg.session_id);
 
-                if (session && index > 0) { // Don't show banner for first session
+                if (session && actualIndex > 0) { // Don't show banner for first session
                     const sessionTime = this.formatSessionTime(session.started_at);
                     html += `
                         <div class="session-banner">
@@ -715,7 +765,99 @@ class InfinitixControlPanel {
         });
 
         chatMessages.innerHTML = html;
-        this.scrollToBottom();
+
+        // Setup load more button handler
+        this.setupLoadMoreHandler(conversation);
+
+        // Setup scroll detection for auto-loading
+        this.setupScrollLoadDetection(conversation);
+
+        // Scroll to bottom on initial load, preserve position on load more
+        if (!appendOlder) {
+            this.scrollToBottom();
+        }
+    }
+
+    // Setup load more button click handler
+    setupLoadMoreHandler(conversation) {
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        if (loadMoreBtn) {
+            loadMoreBtn.addEventListener('click', () => {
+                this.loadOlderMessages(conversation);
+            });
+        }
+    }
+
+    // Setup scroll detection to auto-load when reaching top
+    setupScrollLoadDetection(conversation) {
+        const chatMessages = document.getElementById('chatMessages');
+        if (!chatMessages) return;
+
+        // Remove existing listener to avoid duplicates
+        chatMessages.removeEventListener('scroll', chatMessages._scrollHandler);
+
+        // Create scroll handler
+        chatMessages._scrollHandler = () => {
+            // If scrolled near top (within 100px) and not already loading
+            if (chatMessages.scrollTop < 100 && !this.isLoadingMoreMessages) {
+                const allMessages = conversation.messages || [];
+                const startIndex = Math.max(0, allMessages.length - this.displayedMessageCount);
+
+                // Only load if there are more messages
+                if (startIndex > 0) {
+                    this.loadOlderMessages(conversation);
+                }
+            }
+        };
+
+        chatMessages.addEventListener('scroll', chatMessages._scrollHandler);
+    }
+
+    // Load older messages
+    async loadOlderMessages(conversation) {
+        if (this.isLoadingMoreMessages) return;
+
+        const allMessages = conversation.messages || [];
+        const totalMessages = allMessages.length;
+        const startIndex = Math.max(0, totalMessages - this.displayedMessageCount);
+
+        // Check if there are more messages to load
+        if (startIndex <= 0) return;
+
+        this.isLoadingMoreMessages = true;
+
+        // Show loading indicator
+        const loadingIndicator = document.getElementById('loadingMessages');
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (loadingIndicator) loadingIndicator.style.display = 'flex';
+        if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+
+        // Simulate a small delay for UX (and to prevent rapid firing)
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // Get current scroll position and height
+        const chatMessages = document.getElementById('chatMessages');
+        const previousScrollHeight = chatMessages ? chatMessages.scrollHeight : 0;
+
+        // Increase displayed message count
+        this.displayedMessageCount = Math.min(
+            this.displayedMessageCount + this.messagesLoadIncrement,
+            totalMessages
+        );
+
+        // Re-render messages
+        this.renderMessages(conversation, true);
+
+        // Restore scroll position to keep user at same place
+        if (chatMessages) {
+            const newScrollHeight = chatMessages.scrollHeight;
+            const scrollDiff = newScrollHeight - previousScrollHeight;
+            chatMessages.scrollTop = scrollDiff;
+        }
+
+        this.isLoadingMoreMessages = false;
+
+        console.log(`📜 Loaded older messages. Now showing ${this.displayedMessageCount}/${totalMessages} messages`);
     }
 
     renderMessage(message) {
