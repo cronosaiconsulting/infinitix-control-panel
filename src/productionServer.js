@@ -546,17 +546,31 @@ class ProductionServer {
         const dbRow = fetchResult.rows[0];
         const existingMetadata = dbRow.metadata || {};
 
-        // Build metadata with user_id, full_name, and wa_id if provided (for in-memory conversation)
+        // Determine wa_id for source detection (priority order):
+        // 1. wa_id from webhook payload (if provided)
+        // 2. wa_id from existing metadata (if stored by n8n)
+        // 3. session's user_id if it's a valid phone number (WhatsApp sessions store phone in user_id)
+        const isValidPhone = (val) => {
+          if (!val) return false;
+          const str = String(val);
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)) return false;
+          return /^\+?\d{6,}$/.test(str);
+        };
+
+        // Use session's user_id as wa_id if it's a valid phone (WhatsApp session)
+        const effectiveWaId = wa_id || existingMetadata.wa_id || (isValidPhone(dbRow.user_id) ? dbRow.user_id : '');
+
+        // Build metadata with user_id, full_name, and wa_id
         // IMPORTANT: wa_id is critical for source detection (whatsapp vs web)
         const updatedMetadata = {
           ...existingMetadata,
           user_id: user_id || existingMetadata.user_id || '',
           full_name: full_name || existingMetadata.full_name || '',
-          wa_id: wa_id || existingMetadata.wa_id || '',
+          wa_id: effectiveWaId,
           source: 'webhook'
         };
 
-        console.log(`📌 Bot response webhook: NO database write - only broadcasting to interface`);
+        console.log(`📌 Bot response webhook: effectiveWaId=${effectiveWaId || 'none'} (source: ${effectiveWaId ? 'whatsapp' : 'web'})`);
 
         // Create DB message format for processing
         const dbMessage = {
