@@ -124,8 +124,7 @@ class ProductionServer {
     const fullName = metadata.full_name || '';
     const customer_id = dbMessage.customer_id;
 
-    // Determine source: WhatsApp if wa_id is a valid phone number, otherwise Web
-    const wa_id = metadata.wa_id || '';
+    // Helper: Check if value is a valid phone number (not UUID)
     const isValidPhone = (val) => {
       if (!val) return false;
       const str = String(val);
@@ -134,6 +133,13 @@ class ProductionServer {
       // Phone pattern - digits with optional +
       return /^\+?\d{6,}$/.test(str);
     };
+
+    // Determine wa_id for source detection (priority order):
+    // 1. wa_id from metadata (if stored by n8n)
+    // 2. session's user_id if it's a valid phone number (WhatsApp sessions store phone in user_id)
+    const wa_id = metadata.wa_id || (isValidPhone(dbMessage.user_id) ? dbMessage.user_id : '');
+
+    // Determine source: WhatsApp if wa_id is a valid phone number, otherwise Web
     const source = isValidPhone(wa_id) ? 'whatsapp' : 'web';
 
     // Conversation identification logic (PRIORITY ORDER):
