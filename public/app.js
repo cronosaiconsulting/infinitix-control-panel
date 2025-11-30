@@ -807,33 +807,42 @@ class InfinitixControlPanel {
 
     // Determine conversation source (whatsapp or web)
     getConversationSource(conv) {
-        // If explicitly set, use it
+        // If explicitly set by server, use it (new approach)
         if (conv.source) return conv.source;
 
-        // Infer from phone number / user_id pattern
-        // WhatsApp: phone numbers (digits, potentially with +)
-        // Web: UUIDs, emails, or other formats
+        // Helper: Check if value is a valid phone number (not UUID)
+        const isValidPhone = (val) => {
+            if (!val) return false;
+            const str = String(val);
+            // UUID pattern - not a phone
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)) return false;
+            // Phone pattern - digits with optional +, at least 6 digits
+            return /^\+?\d{6,}$/.test(str.replace(/[\s-]/g, ''));
+        };
+
+        // Check if any session has a valid wa_id (WhatsApp ID)
         const sessions = conv.sessions || [];
         for (const session of sessions) {
-            const phone = session.phone_number || '';
-            // Check if it's a phone number pattern (digits, optional +, at least 9 digits)
-            if (/^\+?\d{9,15}$/.test(phone.replace(/[\s-]/g, ''))) {
+            // wa_id is the primary indicator - if it's a valid phone, it's WhatsApp
+            if (isValidPhone(session.wa_id)) {
                 return 'whatsapp';
             }
         }
 
-        // Check user_id pattern
+        // Fallback: check phone_number in sessions
+        for (const session of sessions) {
+            if (isValidPhone(session.phone_number)) {
+                return 'whatsapp';
+            }
+        }
+
+        // Check user_id pattern (might be phone for WhatsApp)
         const userId = conv.user_id || '';
-        if (/^\+?\d{9,15}$/.test(userId.replace(/[\s-]/g, ''))) {
+        if (isValidPhone(userId)) {
             return 'whatsapp';
         }
 
-        // UUID pattern suggests web chat
-        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
-            return 'web';
-        }
-
-        // Default to web for unknown patterns
+        // Default to web for everything else (including UUIDs)
         return 'web';
     }
 

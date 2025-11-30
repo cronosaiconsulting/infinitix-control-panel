@@ -124,11 +124,26 @@ class ProductionServer {
     const fullName = metadata.full_name || '';
     const customer_id = dbMessage.customer_id;
 
+    // Determine source: WhatsApp if wa_id is a valid phone number, otherwise Web
+    const wa_id = metadata.wa_id || '';
+    const isValidPhone = (val) => {
+      if (!val) return false;
+      const str = String(val);
+      // UUID pattern - not a phone
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)) return false;
+      // Phone pattern - digits with optional +
+      return /^\+?\d{6,}$/.test(str);
+    };
+    const source = isValidPhone(wa_id) ? 'whatsapp' : 'web';
+
     // Conversation identification logic (PRIORITY ORDER):
-    // 1. If customer_id exists: conversation_id = "customer_" + customer_id (HIGHEST PRIORITY - group all sessions for same customer)
-    // 2. Else if metadata.user_id provided: conversation_id = metadata.user_id
-    // 3. Else: conversation_id = "session_" + session_id
-    const conversationId = customer_id ? `customer_${customer_id}` : (customUserId ? customUserId : `session_${dbMessage.session_id}`);
+    // IMPORTANT: Web and WhatsApp conversations are ALWAYS separate, even for same customer
+    // 1. If customer_id exists: conversation_id = "{source}_customer_{customer_id}"
+    // 2. Else if metadata.user_id provided: conversation_id = "{source}_{user_id}"
+    // 3. Else: conversation_id = "{source}_session_{session_id}"
+    const conversationId = customer_id
+      ? `${source}_customer_${customer_id}`
+      : (customUserId ? `${source}_${customUserId}` : `${source}_session_${dbMessage.session_id}`);
 
     console.log(`📊 Processing message: session=${dbMessage.session_id}, customer_id=${customer_id}, conv_id=${conversationId}`);
 
@@ -162,8 +177,8 @@ class ProductionServer {
     }
 
     // Check if we need to merge conversations
-    // Scenario 1: Migrate from session_XXX to customer_XXX when customer_id becomes available
-    const sessionConvId = `session_${dbMessage.session_id}`;
+    // Scenario 1: Migrate from {source}_session_XXX to {source}_customer_XXX when customer_id becomes available
+    const sessionConvId = `${source}_session_${dbMessage.session_id}`;
     if (customer_id && this.conversations.has(sessionConvId) && !this.conversations.has(conversationId)) {
       console.log(`🔀 Migrating conversation: ${sessionConvId} → ${conversationId} (customer_id available)`);
       const sessionConv = this.conversations.get(sessionConvId);
@@ -174,10 +189,12 @@ class ProductionServer {
         display_name: displayName,
         user_id: customUserId,
         customer_id: customer_id,
+        source: source, // 'whatsapp' or 'web'
         sessions: [{
           session_id: dbMessage.session_id,
           started_at: sessionConv.messages.length > 0 ? sessionConv.messages[0].timestamp : Date.now(),
           phone_number: phoneNumber,
+          wa_id: wa_id || null,
           message_count: sessionConv.messages.length
         }],
         messages: [...sessionConv.messages],
@@ -189,21 +206,24 @@ class ProductionServer {
       // Delete old session conversation
       this.conversations.delete(sessionConvId);
     }
-    // Scenario 2: Migrate from session_XXX to metadata user_id
-    else if (customUserId && !customer_id && this.conversations.has(sessionConvId) && !this.conversations.has(customUserId)) {
-      console.log(`🔀 Migrating conversation: ${sessionConvId} → ${customUserId} (metadata user_id)`);
+    // Scenario 2: Migrate from {source}_session_XXX to {source}_{user_id}
+    const userConvId = `${source}_${customUserId}`;
+    if (customUserId && !customer_id && this.conversations.has(sessionConvId) && !this.conversations.has(userConvId)) {
+      console.log(`🔀 Migrating conversation: ${sessionConvId} → ${userConvId} (metadata user_id)`);
       const sessionConv = this.conversations.get(sessionConvId);
 
       // Create new user conversation with migrated messages
-      this.conversations.set(customUserId, {
-        id: customUserId,
+      this.conversations.set(userConvId, {
+        id: userConvId,
         display_name: displayName,
         user_id: customUserId,
         customer_id: null,
+        source: source, // 'whatsapp' or 'web'
         sessions: [{
           session_id: dbMessage.session_id,
           started_at: sessionConv.messages.length > 0 ? sessionConv.messages[0].timestamp : Date.now(),
           phone_number: phoneNumber,
+          wa_id: wa_id || null,
           message_count: sessionConv.messages.length
         }],
         messages: [...sessionConv.messages],
@@ -223,10 +243,12 @@ class ProductionServer {
         display_name: displayName,
         user_id: customUserId || '',
         customer_id: customer_id || null,
+        source: source, // 'whatsapp' or 'web'
         sessions: [{
           session_id: dbMessage.session_id,
           started_at: dbMessage.timestamp,
           phone_number: phoneNumber,
+          wa_id: wa_id || null,
           message_count: 0
         }],
         messages: [],
@@ -251,11 +273,15 @@ class ProductionServer {
         session_id: dbMessage.session_id,
         started_at: dbMessage.timestamp,
         phone_number: phoneNumber,
+        wa_id: wa_id || null,
         message_count: 0
       });
 
       // Sort sessions by started_at
       conversation.sessions.sort((a, b) => a.started_at - b.started_at);
+    } else if (wa_id && !existingSession.wa_id) {
+      // Update wa_id if it wasn't set before
+      existingSession.wa_id = wa_id;
     }
 
     // Add user message
