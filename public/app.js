@@ -8,6 +8,7 @@ class InfinitixControlPanel {
         this.currentConversationId = null;
         this.searchQuery = '';
         this.activeFilter = 'all';
+        this.sourceFilter = 'all'; // 'all', 'whatsapp', 'web'
         this.searchDebounceTimer = null;
         this.lastSoundPlayedTime = 0;
         this.init();
@@ -181,6 +182,19 @@ class InfinitixControlPanel {
             });
         });
 
+        // Source tabs (WhatsApp / Web / All)
+        document.querySelectorAll('.source-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                // Update active state
+                document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+
+                // Update source filter
+                this.sourceFilter = e.currentTarget.dataset.source;
+                this.renderConversations();
+            });
+        });
+
         // Export button
         const exportBtn = document.getElementById('exportBtn');
         if (exportBtn) {
@@ -206,7 +220,50 @@ class InfinitixControlPanel {
             }
         });
 
+        // Bot control button (Pause/Resume AI)
+        const botControlBtn = document.getElementById('botControlBtn');
+        if (botControlBtn) {
+            botControlBtn.addEventListener('click', () => {
+                this.toggleBotStatus();
+            });
+        }
+
+        // Template button (TODO: requires whatsapp_templates table)
+        const sendTemplateBtn = document.getElementById('sendTemplateBtn');
+        if (sendTemplateBtn) {
+            sendTemplateBtn.addEventListener('click', () => {
+                console.log('📝 Template button clicked');
+                alert('⚠️ Sistema de plantillas no disponible.\n\nTODO: Requiere crear la tabla whatsapp_templates en PostgreSQL.');
+            });
+        }
+
         console.log('✅ Event listeners setup complete');
+    }
+
+    // Toggle bot status (pause/resume AI)
+    async toggleBotStatus() {
+        if (!this.currentConversationId) return;
+
+        const conversation = this.conversations.get(this.currentConversationId);
+        if (!conversation) return;
+
+        const newStatus = conversation.bot_status === 'paused' ? 'active' : 'paused';
+
+        console.log(`🤖 Toggling bot status to: ${newStatus}`);
+
+        try {
+            // TODO: Send to backend to update bot_status in database
+            // For now, just update locally
+            conversation.bot_status = newStatus;
+            this.conversations.set(this.currentConversationId, conversation);
+            this.updateBotControlButton(conversation);
+
+            // Show feedback
+            const action = newStatus === 'paused' ? 'pausada' : 'reanudada';
+            console.log(`✅ IA ${action} para esta conversación`);
+        } catch (error) {
+            console.error('❌ Error toggling bot status:', error);
+        }
     }
 
     setupKeyboardShortcuts() {
@@ -350,6 +407,38 @@ class InfinitixControlPanel {
         }
     }
 
+    // Determine conversation source (whatsapp or web)
+    getConversationSource(conv) {
+        // If explicitly set, use it
+        if (conv.source) return conv.source;
+
+        // Infer from phone number / user_id pattern
+        // WhatsApp: phone numbers (digits, potentially with +)
+        // Web: UUIDs, emails, or other formats
+        const sessions = conv.sessions || [];
+        for (const session of sessions) {
+            const phone = session.phone_number || '';
+            // Check if it's a phone number pattern (digits, optional +, at least 9 digits)
+            if (/^\+?\d{9,15}$/.test(phone.replace(/[\s-]/g, ''))) {
+                return 'whatsapp';
+            }
+        }
+
+        // Check user_id pattern
+        const userId = conv.user_id || '';
+        if (/^\+?\d{9,15}$/.test(userId.replace(/[\s-]/g, ''))) {
+            return 'whatsapp';
+        }
+
+        // UUID pattern suggests web chat
+        if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+            return 'web';
+        }
+
+        // Default to web for unknown patterns
+        return 'web';
+    }
+
     renderConversations() {
         const conversationList = document.getElementById('conversationList');
         if (!conversationList) return;
@@ -361,6 +450,14 @@ class InfinitixControlPanel {
         // Debug: Log unread counts
         const totalUnread = sortedConversations.filter(c => c.unread > 0).length;
         console.log(`📊 Rendering ${sortedConversations.length} conversations, ${totalUnread} with unread messages`);
+
+        // Apply source filter
+        if (this.sourceFilter !== 'all') {
+            sortedConversations = sortedConversations.filter(conv => {
+                const source = this.getConversationSource(conv);
+                return source === this.sourceFilter;
+            });
+        }
 
         // Apply search filter
         if (this.searchQuery) {
@@ -387,6 +484,8 @@ class InfinitixControlPanel {
                 'No se encontraron conversaciones' :
                 this.activeFilter === 'unread' ?
                 'No hay conversaciones sin leer' :
+                this.sourceFilter !== 'all' ?
+                `No hay conversaciones de ${this.sourceFilter === 'whatsapp' ? 'WhatsApp' : 'Web'}` :
                 'No hay conversaciones activas';
             conversationList.innerHTML = `<div class="empty-state"><p>${emptyMessage}</p></div>`;
             return;
@@ -397,6 +496,7 @@ class InfinitixControlPanel {
             const displayName = conv.display_name || (this.contacts.get(conv.user_id) || { name: `Usuario ${conv.id}` }).name;
             const time = this.formatTime(conv.lastTimestamp);
             const isActive = this.currentConversationId === conv.id;
+            const source = this.getConversationSource(conv);
 
             // Debug: Log unread status for each conversation
             if (conv.unread > 0) {
@@ -408,8 +508,9 @@ class InfinitixControlPanel {
                 `<span class="session-count">${conv.sessions.length} sesiones</span>` : '';
 
             return `
-                <div class="conversation-item ${isActive ? 'active' : ''} ${conv.unread > 0 ? 'has-unread' : ''}" data-id="${conv.id}">
+                <div class="conversation-item ${isActive ? 'active' : ''} ${conv.unread > 0 ? 'has-unread' : ''}" data-id="${conv.id}" data-source="${source}">
                     <div class="conversation-header">
+                        <span class="source-indicator ${source}"></span>
                         <span class="conversation-name">${this.escapeHtml(displayName)}</span>
                         <span class="conversation-time">${time}</span>
                     </div>
@@ -448,8 +549,111 @@ class InfinitixControlPanel {
         this.showChatActive();
         this.renderChatHeader(conversation);
         this.renderMessages(conversation);
+        this.updateSessionStatus(conversation);
+        this.updateBotControlButton(conversation);
         this.renderConversations(); // Update the list to show active state
         this.markConversationAsRead(conversationId);
+    }
+
+    // Get last user message timestamp for 24h window calculation
+    getLastUserMessageTimestamp(conversation) {
+        const messages = conversation.messages || [];
+        // Find last message from user (not bot)
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].user_id !== '0') {
+                return messages[i].timestamp;
+            }
+        }
+        return null;
+    }
+
+    // Check if WhatsApp 24h session is active
+    isSessionActive(conversation) {
+        const source = this.getConversationSource(conversation);
+        if (source !== 'whatsapp') return true; // Web chat always active
+
+        const lastUserMessageTime = this.getLastUserMessageTimestamp(conversation);
+        if (!lastUserMessageTime) return false;
+
+        const now = Date.now();
+        const diff = now - lastUserMessageTime;
+        const hours24 = 24 * 60 * 60 * 1000;
+
+        return diff < hours24;
+    }
+
+    // Update session status badge and input state
+    updateSessionStatus(conversation) {
+        const source = this.getConversationSource(conversation);
+        const sessionStatus = document.getElementById('sessionStatus');
+        const statusBadge = document.getElementById('statusBadge');
+        const chatInputContainer = document.getElementById('chatInputContainer');
+        const templateSelector = document.getElementById('templateSelector');
+        const messageInput = document.getElementById('messageInput');
+
+        // Only show session status for WhatsApp
+        if (source !== 'whatsapp') {
+            if (sessionStatus) sessionStatus.style.display = 'none';
+            if (chatInputContainer) chatInputContainer.classList.remove('locked');
+            if (templateSelector) templateSelector.style.display = 'none';
+            if (messageInput) messageInput.placeholder = 'Escribe un mensaje...';
+            return;
+        }
+
+        // Show session status for WhatsApp
+        if (sessionStatus) sessionStatus.style.display = 'flex';
+
+        const isActive = this.isSessionActive(conversation);
+
+        if (statusBadge) {
+            statusBadge.classList.toggle('active', isActive);
+            statusBadge.classList.toggle('expired', !isActive);
+            statusBadge.textContent = isActive ? 'Sesión Activa' : 'Sesión Cerrada';
+        }
+
+        // Lock/unlock input based on session status
+        if (chatInputContainer) {
+            chatInputContainer.classList.toggle('locked', !isActive);
+        }
+
+        if (templateSelector) {
+            templateSelector.style.display = isActive ? 'none' : 'flex';
+        }
+
+        if (messageInput) {
+            messageInput.placeholder = isActive
+                ? 'Escribe un mensaje...'
+                : 'Sesión expirada. Usa una plantilla para reabrir.';
+            messageInput.disabled = !isActive;
+        }
+
+        const sendBtn = document.getElementById('sendMessageBtn');
+        if (sendBtn) {
+            sendBtn.disabled = !isActive;
+        }
+    }
+
+    // Update bot control button state
+    updateBotControlButton(conversation) {
+        const botControlBtn = document.getElementById('botControlBtn');
+        const botControlLabel = document.getElementById('botControlLabel');
+        const botControlIcon = document.getElementById('botControlIcon');
+
+        if (!botControlBtn) return;
+
+        const isPaused = conversation.bot_status === 'paused';
+
+        botControlBtn.classList.toggle('paused', isPaused);
+        if (botControlLabel) {
+            botControlLabel.textContent = isPaused ? 'Reanudar IA' : 'Pausar IA';
+        }
+
+        // Update icon (pause or play)
+        if (botControlIcon) {
+            botControlIcon.innerHTML = isPaused
+                ? '<path d="M6 4l12 6-12 6V4z"/>' // Play icon
+                : '<path d="M6 4h3v12H6V4zm5 0h3v12h-3V4z"/>'; // Pause icon
+        }
     }
 
     showChatEmpty() {
@@ -591,27 +795,37 @@ class InfinitixControlPanel {
         }
 
         const now = new Date();
-        const diff = now - date;
+        const time = date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
-        // Less than 1 minute
-        if (diff < 60000) {
-            return 'Ahora';
+        // Check if today
+        const isToday = date.toDateString() === now.toDateString();
+        if (isToday) {
+            return time;
         }
 
-        // Less than 1 hour
-        if (diff < 3600000) {
-            const minutes = Math.floor(diff / 60000);
-            return `${minutes}m`;
+        // Check if yesterday
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const isYesterday = date.toDateString() === yesterday.toDateString();
+        if (isYesterday) {
+            return `Ayer ${time}`;
         }
 
-        // Less than 24 hours
-        if (diff < 86400000) {
-            const hours = Math.floor(diff / 3600000);
-            return `${hours}h`;
+        // Check if within past week (not today, not yesterday)
+        const oneWeekAgo = new Date(now);
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        if (date > oneWeekAgo) {
+            // Spanish day abbreviations
+            const dayNames = ['Dom.', 'Lun.', 'Mar.', 'Mié.', 'Jue.', 'Vie.', 'Sáb.'];
+            const dayName = dayNames[date.getDay()];
+            return `${dayName} ${time}`;
         }
 
-        // Show time
-        return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+        // Older than a week: dd/mm/yyyy hh:mm
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year} ${time}`;
     }
 
     formatSessionTime(timestamp) {
@@ -632,27 +846,37 @@ class InfinitixControlPanel {
         }
 
         const now = new Date();
-        const isToday = date.toDateString() === now.toDateString();
+        const time = date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
+        // Check if today
+        const isToday = date.toDateString() === now.toDateString();
         if (isToday) {
-            return `Hoy a las ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+            return `Hoy a las ${time}`;
         }
 
+        // Check if yesterday
         const yesterday = new Date(now);
         yesterday.setDate(yesterday.getDate() - 1);
         const isYesterday = date.toDateString() === yesterday.toDateString();
-
         if (isYesterday) {
-            return `Ayer a las ${date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+            return `Ayer a las ${time}`;
         }
 
-        return date.toLocaleDateString('es-ES', {
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
+        // Check if within past week
+        const oneWeekAgo = new Date(now);
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        if (date > oneWeekAgo) {
+            // Spanish day names (full for session banners)
+            const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+            const dayName = dayNames[date.getDay()];
+            return `${dayName} a las ${time}`;
+        }
+
+        // Older than a week: dd/mm/yyyy hh:mm
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getFullYear();
+        return `${day}/${month}/${year} ${time}`;
     }
 
     exportConversation() {
