@@ -506,9 +506,9 @@ class ProductionServer {
     // Webhook: Receive bot response
     this.app.post('/webhook/bot-response', verifyWebhook, async (req, res) => {
       try {
-        const { message, message_id, user_id, full_name } = req.body;
+        const { message, message_id, user_id, full_name, wa_id } = req.body;
 
-        console.log(`🤖 Bot response received: ${message_id}, user_id: ${user_id || 'none'} - ${message?.substring(0, 50) || 'no message'}...`);
+        console.log(`🤖 Bot response received: ${message_id}, user_id: ${user_id || 'none'}, wa_id: ${wa_id || 'none'} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
         if (!message_id || !message) {
@@ -546,11 +546,13 @@ class ProductionServer {
         const dbRow = fetchResult.rows[0];
         const existingMetadata = dbRow.metadata || {};
 
-        // Build metadata with user_id and full_name if provided (for in-memory conversation)
+        // Build metadata with user_id, full_name, and wa_id if provided (for in-memory conversation)
+        // IMPORTANT: wa_id is critical for source detection (whatsapp vs web)
         const updatedMetadata = {
           ...existingMetadata,
           user_id: user_id || existingMetadata.user_id || '',
           full_name: full_name || existingMetadata.full_name || '',
+          wa_id: wa_id || existingMetadata.wa_id || '',
           source: 'webhook'
         };
 
