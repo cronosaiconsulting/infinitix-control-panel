@@ -60,6 +60,9 @@ class ProductionServer {
         this.processMessageFromDB(dbMessage);
       }
 
+      // Load manual messages and merge into conversations
+      await this.loadManualMessages();
+
       // Broadcast initial state
       this.broadcast({
         type: 'init',
@@ -72,6 +75,43 @@ class ProductionServer {
       this.lastSyncTimestamp = Date.now();
     } catch (error) {
       console.error('❌ Failed to load historical messages:', error);
+    }
+  }
+
+  // Load manual messages from database and merge into conversations
+  async loadManualMessages() {
+    try {
+      const manualMessages = await database.getAllManualMessages(30); // Last 30 days
+      console.log(`📥 Loading ${manualMessages.length} manual messages...`);
+
+      for (const mm of manualMessages) {
+        const conversation = this.conversations.get(mm.conversation_id);
+        if (conversation) {
+          // Check if message already exists
+          const exists = conversation.messages.some(m => m.id === `manual_${mm.id}`);
+          if (!exists) {
+            conversation.messages.push({
+              id: `manual_${mm.id}`,
+              user_id: 'agent',
+              message: mm.message,
+              timestamp: mm.timestamp,
+              session_id: mm.session_id,
+              is_manual: true,
+              status: mm.status,
+              error: mm.error_message
+            });
+          }
+        }
+      }
+
+      // Re-sort messages in each conversation by timestamp
+      for (const conversation of this.conversations.values()) {
+        conversation.messages.sort((a, b) => a.timestamp - b.timestamp);
+      }
+
+      console.log(`✅ Manual messages merged into conversations`);
+    } catch (error) {
+      console.error('❌ Failed to load manual messages:', error);
     }
   }
 
@@ -584,6 +624,143 @@ class ProductionServer {
       } catch (error) {
         res.status(500).json({ success: false, error: error.message });
       }
+    });
+
+    // Send manual message (HITL)
+    this.app.post('/api/send-message', async (req, res) => {
+      try {
+        const { conversation_id, wa_id, message, session_id } = req.body;
+
+        console.log(`📤 Manual message request: conversation=${conversation_id}, wa_id=${wa_id}`);
+
+        // Validate required fields
+        if (!conversation_id || !message) {
+          return res.status(400).json({
+            success: false,
+            error: 'Missing required fields: conversation_id, message'
+          });
+        }
+
+        // Get n8n webhook URL from environment
+        const n8nWebhookUrl = process.env.N8N_MANUAL_MESSAGE_WEBHOOK;
+        if (!n8nWebhookUrl) {
+          return res.status(500).json({
+            success: false,
+            error: 'N8N_MANUAL_MESSAGE_WEBHOOK not configured'
+          });
+        }
+
+        // Save message to database first
+        const savedMessage = await database.insertManualMessage({
+          conversation_id,
+          session_id,
+          wa_id,
+          message
+        });
+
+        console.log(`💾 Manual message saved with id: ${savedMessage.id}`);
+
+        // Send to n8n webhook
+        let webhookResponse;
+        let webhookError = null;
+
+        try {
+          const response = await fetch(n8nWebhookUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              wa_id: wa_id,
+              messageToSend: message
+            })
+          });
+
+          webhookResponse = await response.json().catch(() => ({ status: response.status }));
+
+          if (response.ok) {
+            // Update message status to sent
+            await database.updateManualMessageStatus(savedMessage.id, 'sent', webhookResponse);
+            console.log(`✅ Manual message sent successfully`);
+          } else {
+            webhookError = `Webhook returned ${response.status}`;
+            await database.updateManualMessageStatus(savedMessage.id, 'failed', webhookResponse, webhookError);
+            console.error(`❌ Webhook failed: ${webhookError}`);
+          }
+        } catch (fetchError) {
+          webhookError = fetchError.message;
+          await database.updateManualMessageStatus(savedMessage.id, 'failed', null, webhookError);
+          console.error(`❌ Webhook error: ${webhookError}`);
+        }
+
+        // Create message object for broadcasting
+        const manualMessage = {
+          id: `manual_${savedMessage.id}`,
+          user_id: 'agent', // Special ID for agent messages
+          message: message,
+          timestamp: savedMessage.timestamp || Date.now(),
+          session_id: session_id,
+          is_manual: true,
+          status: webhookError ? 'failed' : 'sent',
+          error: webhookError
+        };
+
+        // Add to conversation in memory
+        const conversation = this.conversations.get(conversation_id);
+        if (conversation) {
+          conversation.messages.push(manualMessage);
+          conversation.lastMessage = message;
+          conversation.lastTimestamp = manualMessage.timestamp;
+
+          // Broadcast the new message
+          this.broadcast({
+            type: 'manual_message',
+            data: {
+              conversation_id,
+              message: manualMessage,
+              conversation
+            }
+          });
+        }
+
+        res.json({
+          success: !webhookError,
+          message_id: savedMessage.id,
+          status: webhookError ? 'failed' : 'sent',
+          error: webhookError,
+          webhook_response: webhookResponse
+        });
+      } catch (error) {
+        console.error('❌ Error sending manual message:', error);
+        res.status(500).json({
+          success: false,
+          error: error.message
+        });
+      }
+    });
+
+    // Get manual messages for a conversation
+    this.app.get('/api/manual-messages/:conversation_id', async (req, res) => {
+      try {
+        const messages = await database.getManualMessages(req.params.conversation_id);
+        res.json({ success: true, messages });
+      } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+      }
+    });
+
+    // Debug endpoint - get current state
+    this.app.get('/api/debug/state', (req, res) => {
+      res.json({
+        success: true,
+        conversations_count: this.conversations.size,
+        contacts_count: this.contacts.size,
+        config: {
+          n8n_webhook_configured: !!process.env.N8N_MANUAL_MESSAGE_WEBHOOK,
+          webhook_secret_configured: !!process.env.WEBHOOK_SECRET,
+          initial_load_days: process.env.INITIAL_LOAD_DAYS || '365'
+        }
+      });
     });
 
     console.log('✅ Production API endpoints configured');

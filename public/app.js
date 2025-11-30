@@ -18,6 +18,14 @@ class InfinitixControlPanel {
         this.displayedMessageCount = 0; // Current number of displayed messages
         this.isLoadingMoreMessages = false; // Prevent multiple simultaneous loads
 
+        // Dev tools state
+        this.devToolsOpen = false;
+        this.devToolsLogs = [];
+        this.debugState = null;
+
+        // Sending state
+        this.isSendingMessage = false;
+
         this.init();
     }
 
@@ -71,6 +79,28 @@ class InfinitixControlPanel {
             case 'conversation_read':
                 this.handleConversationRead(message.data);
                 break;
+            case 'manual_message':
+                this.handleManualMessage(message.data);
+                break;
+        }
+    }
+
+    handleManualMessage(data) {
+        const { conversation_id, message, conversation } = data;
+
+        console.log(`📝 Manual message in conversation ${conversation_id}:`, message.message?.substring(0, 50));
+        this.addDevLog('info', `Manual message sent to ${conversation_id}`);
+
+        // Update conversation
+        this.conversations.set(conversation_id, conversation);
+
+        // Update conversations list
+        this.renderConversations();
+
+        // If this is the current conversation, re-render messages
+        if (this.currentConversationId === conversation_id) {
+            console.log('📝 Re-rendering current conversation with manual message');
+            this.renderMessages(conversation);
         }
     }
 
@@ -88,6 +118,9 @@ class InfinitixControlPanel {
         data.contacts.forEach(contact => {
             this.contacts.set(contact.user_id, contact);
         });
+
+        // Add agent contact for manual messages
+        this.contacts.set('agent', { user_id: 'agent', name: 'Agente HITL' });
 
         if (this.conversations.size > 0) {
             this.renderConversations();
@@ -244,7 +277,243 @@ class InfinitixControlPanel {
             });
         }
 
+        // Dev tools button
+        const devToolsBtn = document.getElementById('devToolsBtn');
+        if (devToolsBtn) {
+            devToolsBtn.addEventListener('click', () => {
+                this.toggleDevTools();
+            });
+        }
+
+        // Message send button and input
+        const sendMessageBtn = document.getElementById('sendMessageBtn');
+        const messageInput = document.getElementById('messageInput');
+
+        if (sendMessageBtn) {
+            sendMessageBtn.addEventListener('click', () => {
+                this.sendManualMessage();
+            });
+        }
+
+        if (messageInput) {
+            messageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendManualMessage();
+                }
+            });
+        }
+
         console.log('✅ Event listeners setup complete');
+    }
+
+    // Send manual message via API
+    async sendManualMessage() {
+        if (this.isSendingMessage) return;
+
+        const messageInput = document.getElementById('messageInput');
+        const message = messageInput?.value?.trim();
+
+        if (!message || !this.currentConversationId) {
+            console.log('⚠️ No message or no conversation selected');
+            return;
+        }
+
+        const conversation = this.conversations.get(this.currentConversationId);
+        if (!conversation) {
+            console.log('⚠️ Conversation not found');
+            return;
+        }
+
+        // Check if session is active (for WhatsApp)
+        const source = this.getConversationSource(conversation);
+        if (source === 'whatsapp' && !this.isSessionActive(conversation)) {
+            this.showNotification('La sesión de WhatsApp ha expirado. Usa una plantilla para reabrir.', 'error');
+            return;
+        }
+
+        // Get wa_id (phone number) and session_id
+        const sessions = conversation.sessions || [];
+        const latestSession = sessions[sessions.length - 1];
+        const wa_id = latestSession?.phone_number || conversation.user_id;
+        const session_id = latestSession?.session_id;
+
+        this.isSendingMessage = true;
+        const chatInput = document.getElementById('chatInput');
+        if (chatInput) chatInput.classList.add('sending');
+
+        this.addDevLog('info', `Sending message to ${wa_id}...`);
+
+        try {
+            const response = await fetch('/api/send-message', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    conversation_id: this.currentConversationId,
+                    wa_id: wa_id,
+                    message: message,
+                    session_id: session_id
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                console.log('✅ Message sent successfully');
+                this.addDevLog('success', `Message sent (ID: ${result.message_id})`);
+                this.showNotification('Mensaje enviado correctamente', 'success');
+                messageInput.value = '';
+            } else {
+                console.error('❌ Failed to send message:', result.error);
+                this.addDevLog('error', `Failed: ${result.error}`);
+                this.showNotification(`Error al enviar: ${result.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('❌ Error sending message:', error);
+            this.addDevLog('error', `Error: ${error.message}`);
+            this.showNotification('Error de conexión al enviar mensaje', 'error');
+        } finally {
+            this.isSendingMessage = false;
+            if (chatInput) chatInput.classList.remove('sending');
+        }
+    }
+
+    // Toggle dev tools panel
+    toggleDevTools() {
+        this.devToolsOpen = !this.devToolsOpen;
+
+        if (this.devToolsOpen) {
+            this.showDevTools();
+        } else {
+            this.hideDevTools();
+        }
+    }
+
+    // Show dev tools panel
+    async showDevTools() {
+        // Fetch current debug state
+        try {
+            const response = await fetch('/api/debug/state');
+            this.debugState = await response.json();
+        } catch (error) {
+            console.error('Failed to fetch debug state:', error);
+            this.debugState = { error: error.message };
+        }
+
+        const panelHtml = `
+            <div class="dev-tools-panel" id="devToolsPanel">
+                <div class="dev-tools-header">
+                    <h3>
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/>
+                        </svg>
+                        Dev Tools
+                    </h3>
+                    <button class="dev-tools-close" onclick="window.controlPanel.hideDevTools()">&times;</button>
+                </div>
+                <div class="dev-tools-body">
+                    <div class="dev-tools-section">
+                        <h4>
+                            <span class="status-indicator ${this.debugState?.success ? 'ok' : 'error'}"></span>
+                            Estado del Sistema
+                        </h4>
+                        <div class="dev-tools-item">
+                            <span class="label">Conversaciones</span>
+                            <span class="value">${this.debugState?.conversations_count || 0}</span>
+                        </div>
+                        <div class="dev-tools-item">
+                            <span class="label">Contactos</span>
+                            <span class="value">${this.debugState?.contacts_count || 0}</span>
+                        </div>
+                        <div class="dev-tools-item">
+                            <span class="label">WebSocket</span>
+                            <span class="value ${this.ws?.readyState === 1 ? 'success' : 'error'}">${this.ws?.readyState === 1 ? 'Conectado' : 'Desconectado'}</span>
+                        </div>
+                    </div>
+
+                    <div class="dev-tools-section">
+                        <h4>
+                            <span class="status-indicator ${this.debugState?.config?.n8n_webhook_configured ? 'ok' : 'error'}"></span>
+                            Configuración n8n
+                        </h4>
+                        <div class="dev-tools-item">
+                            <span class="label">Webhook HITL</span>
+                            <span class="value ${this.debugState?.config?.n8n_webhook_configured ? 'success' : 'error'}">${this.debugState?.config?.n8n_webhook_configured ? 'Configurado' : 'No configurado'}</span>
+                        </div>
+                        <div class="dev-tools-item">
+                            <span class="label">Webhook Secret</span>
+                            <span class="value ${this.debugState?.config?.webhook_secret_configured ? 'success' : 'warning'}">${this.debugState?.config?.webhook_secret_configured ? 'Configurado' : 'No configurado'}</span>
+                        </div>
+                        <div class="dev-tools-item">
+                            <span class="label">Días de carga</span>
+                            <span class="value">${this.debugState?.config?.initial_load_days || '365'}</span>
+                        </div>
+                    </div>
+
+                    <div class="dev-tools-section">
+                        <h4>Logs Recientes</h4>
+                        <div class="dev-tools-logs" id="devToolsLogs">
+                            ${this.devToolsLogs.length === 0 ? '<div class="dev-tools-log-entry info">Sin logs recientes</div>' :
+                              this.devToolsLogs.slice(-10).map(log => `
+                                <div class="dev-tools-log-entry ${log.type}">
+                                    <span class="timestamp">${log.time}</span>
+                                    ${log.message}
+                                </div>
+                              `).join('')
+                            }
+                        </div>
+                    </div>
+
+                    <button class="dev-tools-btn-refresh" onclick="window.controlPanel.refreshDevTools()">
+                        Actualizar Estado
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Remove existing panel
+        this.hideDevTools();
+
+        // Add new panel
+        document.body.insertAdjacentHTML('beforeend', panelHtml);
+    }
+
+    // Hide dev tools panel
+    hideDevTools() {
+        const existing = document.getElementById('devToolsPanel');
+        if (existing) existing.remove();
+        this.devToolsOpen = false;
+    }
+
+    // Refresh dev tools data
+    async refreshDevTools() {
+        await this.showDevTools();
+        this.showNotification('Estado actualizado', 'info', 1500);
+    }
+
+    // Add log entry to dev tools
+    addDevLog(type, message) {
+        const time = new Date().toLocaleTimeString('es-ES');
+        this.devToolsLogs.push({ type, message, time });
+
+        // Keep only last 50 logs
+        if (this.devToolsLogs.length > 50) {
+            this.devToolsLogs = this.devToolsLogs.slice(-50);
+        }
+
+        // Update logs panel if open
+        const logsContainer = document.getElementById('devToolsLogs');
+        if (logsContainer) {
+            logsContainer.innerHTML = this.devToolsLogs.slice(-10).map(log => `
+                <div class="dev-tools-log-entry ${log.type}">
+                    <span class="timestamp">${log.time}</span>
+                    ${log.message}
+                </div>
+            `).join('');
+            logsContainer.scrollTop = logsContainer.scrollHeight;
+        }
     }
 
     // Toggle bot status (pause/resume AI)
@@ -880,21 +1149,45 @@ class InfinitixControlPanel {
     }
 
     createMessageHTML(message) {
-        const contact = this.contacts.get(message.user_id) || { name: `Usuario ${message.user_id}` };
         const isBot = message.user_id === '0';
+        const isAgent = message.user_id === 'agent' || message.is_manual;
+        const contact = this.contacts.get(message.user_id) || { name: `Usuario ${message.user_id}` };
         const time = this.formatTime(message.timestamp);
-        const initial = contact.name.charAt(0).toUpperCase();
 
-        // For bot messages, use empty string (image will show via CSS)
-        const avatarContent = isBot ? '' : initial;
+        // Determine message type and styling
+        let messageType = 'user';
+        let senderName = contact.name;
+        let avatarContent = contact.name.charAt(0).toUpperCase();
+
+        if (isBot) {
+            messageType = 'bot';
+            senderName = 'Infinitix';
+            avatarContent = ''; // Image will show via CSS
+        } else if (isAgent) {
+            messageType = 'agent';
+            senderName = 'Agente HITL';
+            avatarContent = 'A';
+        }
+
+        // Status indicator for agent messages
+        let statusHtml = '';
+        if (isAgent && message.status) {
+            const statusText = message.status === 'sent' ? 'Enviado' :
+                               message.status === 'failed' ? 'Error' :
+                               message.status === 'pending' ? 'Pendiente' : message.status;
+            const statusIcon = message.status === 'sent' ? '✓' :
+                               message.status === 'failed' ? '✗' : '⏳';
+            statusHtml = `<div class="message-status ${message.status}">${statusIcon} ${statusText}</div>`;
+        }
 
         return `
-            <div class="message ${isBot ? 'bot' : 'user'}">
+            <div class="message ${messageType}">
                 <div class="message-avatar">${avatarContent}</div>
                 <div class="message-content">
-                    <div class="message-sender">${this.escapeHtml(contact.name)}</div>
+                    <div class="message-sender">${this.escapeHtml(senderName)}</div>
                     <div class="message-bubble">${this.escapeHtml(message.message).replace(/\n/g, '<br>')}</div>
                     <div class="message-time">${time}</div>
+                    ${statusHtml}
                 </div>
             </div>
         `;

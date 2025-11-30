@@ -60,6 +60,10 @@ class Database {
 
       if (tables.includes('chat_messages_v2') && tables.includes('chat_sessions_v2')) {
         console.log('✅ Required tables exist');
+
+        // Ensure manual_messages table exists for HITL functionality
+        await this.ensureManualMessagesTable();
+
         return true;
       } else {
         console.warn('⚠️ Missing required tables');
@@ -68,6 +72,137 @@ class Database {
     } catch (error) {
       console.error('❌ Failed to check tables:', error.message);
       return false;
+    }
+  }
+
+  // Create manual_messages table if it doesn't exist
+  async ensureManualMessagesTable() {
+    const query = `
+      CREATE TABLE IF NOT EXISTS manual_messages (
+        id SERIAL PRIMARY KEY,
+        conversation_id VARCHAR(255) NOT NULL,
+        session_id INTEGER,
+        wa_id VARCHAR(50),
+        message TEXT NOT NULL,
+        status VARCHAR(50) DEFAULT 'pending',
+        error_message TEXT,
+        webhook_response JSONB,
+        created_at TIMESTAMP DEFAULT NOW(),
+        sent_at TIMESTAMP
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_manual_messages_conversation ON manual_messages(conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_manual_messages_created_at ON manual_messages(created_at);
+    `;
+
+    try {
+      await this.pool.query(query);
+      console.log('✅ manual_messages table ready');
+    } catch (error) {
+      console.error('❌ Failed to create manual_messages table:', error.message);
+    }
+  }
+
+  // Insert a manual message
+  async insertManualMessage(messageData) {
+    const query = `
+      INSERT INTO manual_messages
+        (conversation_id, session_id, wa_id, message, status)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `;
+
+    const values = [
+      messageData.conversation_id,
+      messageData.session_id || null,
+      messageData.wa_id || null,
+      messageData.message,
+      'pending'
+    ];
+
+    try {
+      const result = await this.pool.query(query, values);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Failed to insert manual message:', error.message);
+      throw error;
+    }
+  }
+
+  // Update manual message status after sending
+  async updateManualMessageStatus(id, status, webhookResponse = null, errorMessage = null) {
+    const query = `
+      UPDATE manual_messages
+      SET status = $1,
+          webhook_response = $2,
+          error_message = $3,
+          sent_at = CASE WHEN $1 = 'sent' THEN NOW() ELSE sent_at END
+      WHERE id = $4
+      RETURNING *
+    `;
+
+    try {
+      const result = await this.pool.query(query, [status, webhookResponse, errorMessage, id]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('❌ Failed to update manual message status:', error.message);
+      throw error;
+    }
+  }
+
+  // Get manual messages for a conversation
+  async getManualMessages(conversationId, limit = 100) {
+    const query = `
+      SELECT
+        id,
+        conversation_id,
+        session_id,
+        wa_id,
+        message,
+        status,
+        error_message,
+        EXTRACT(EPOCH FROM created_at) * 1000 as timestamp,
+        EXTRACT(EPOCH FROM sent_at) * 1000 as sent_timestamp
+      FROM manual_messages
+      WHERE conversation_id = $1
+      ORDER BY created_at ASC
+      LIMIT $2
+    `;
+
+    try {
+      const result = await this.pool.query(query, [conversationId, limit]);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Failed to get manual messages:', error.message);
+      throw error;
+    }
+  }
+
+  // Get all manual messages (for loading into memory on startup)
+  async getAllManualMessages(days = 30) {
+    const query = `
+      SELECT
+        id,
+        conversation_id,
+        session_id,
+        wa_id,
+        message,
+        status,
+        error_message,
+        EXTRACT(EPOCH FROM created_at) * 1000 as timestamp,
+        EXTRACT(EPOCH FROM sent_at) * 1000 as sent_timestamp
+      FROM manual_messages
+      WHERE created_at >= NOW() - INTERVAL '${days} days'
+      ORDER BY created_at ASC
+    `;
+
+    try {
+      const result = await this.pool.query(query);
+      console.log(`📥 Loaded ${result.rows.length} manual messages from last ${days} days`);
+      return result.rows;
+    } catch (error) {
+      console.error('❌ Failed to get all manual messages:', error.message);
+      throw error;
     }
   }
 
