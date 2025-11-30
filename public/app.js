@@ -671,14 +671,28 @@ class InfinitixControlPanel {
 
         // Build info panel content
         const sessions = conversation.sessions || [];
-        const sessionsHtml = sessions.map(s => `
-            <div class="info-session">
-                <strong>Sesión #${s.session_id}</strong>
-                <div>Teléfono: ${s.phone_number}</div>
-                <div>Iniciada: ${new Date(s.started_at).toLocaleString('es-ES')}</div>
-                <div>Mensajes: ${s.message_count}</div>
-            </div>
-        `).join('');
+        const sessionsHtml = sessions.map(s => {
+            // Use wa_id if available (WhatsApp phone), otherwise phone_number
+            const phoneDisplay = s.wa_id || s.phone_number || 'No disponible';
+
+            // Handle invalid dates gracefully
+            let startedAtDisplay = 'No disponible';
+            if (s.started_at && !isNaN(s.started_at) && s.started_at > 0) {
+                const startDate = new Date(s.started_at);
+                if (!isNaN(startDate.getTime())) {
+                    startedAtDisplay = startDate.toLocaleString('es-ES');
+                }
+            }
+
+            return `
+                <div class="info-session">
+                    <strong>Sesión #${s.session_id}</strong>
+                    <div>Teléfono: ${phoneDisplay}</div>
+                    <div>Iniciada: ${startedAtDisplay}</div>
+                    <div>Mensajes: ${s.message_count || 0}</div>
+                </div>
+            `;
+        }).join('');
 
         const infoHtml = `
             <div class="info-panel-overlay" id="infoPanelOverlay">
@@ -699,7 +713,7 @@ class InfinitixControlPanel {
                             <h4>Estadísticas</h4>
                             <div><strong>Total Mensajes:</strong> ${conversation.messages.length}</div>
                             <div><strong>Total Sesiones:</strong> ${sessions.length}</div>
-                            <div><strong>Último mensaje:</strong> ${new Date(conversation.lastTimestamp).toLocaleString('es-ES')}</div>
+                            <div><strong>Último mensaje:</strong> ${conversation.lastTimestamp && !isNaN(conversation.lastTimestamp) ? new Date(conversation.lastTimestamp).toLocaleString('es-ES') : 'No disponible'}</div>
                         </div>
                         <div class="info-section">
                             <h4>Sesiones</h4>

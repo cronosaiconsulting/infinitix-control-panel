@@ -354,9 +354,9 @@ class ProductionServer {
     // Webhook: Receive user message
     this.app.post('/webhook/user-message', verifyWebhook, async (req, res) => {
       try {
-        const { message, message_id, session_id, user_id, full_name } = req.body;
+        const { message, message_id, session_id, user_id, full_name, wa_id } = req.body;
 
-        console.log(`📨 User message received: session ${session_id}, user_id: ${user_id || 'none'} - ${message?.substring(0, 50) || 'no message'}...`);
+        console.log(`📨 User message received: session ${session_id}, user_id: ${user_id || 'none'}, wa_id: ${wa_id || 'none'} - ${message?.substring(0, 50) || 'no message'}...`);
 
         // Validate required fields
         if (!session_id || !message) {
@@ -394,14 +394,18 @@ class ProductionServer {
         // Generate message_id if not provided (for response)
         const finalMessageId = message_id || `msg_${Date.now()}_${session_id}`;
 
-        // Build metadata with user_id and full_name
+        // Use wa_id as the phone number if provided (WhatsApp), otherwise fall back to session's user_id
+        const effectivePhoneNumber = wa_id || phone_number;
+
+        // Build metadata with user_id, full_name, and wa_id
         const metadata = {
           source: 'webhook',
           user_id: user_id || '',
           full_name: full_name || '',
+          wa_id: wa_id || '',
           session_info: {
             session_id: session_id,
-            phone_number: phone_number
+            phone_number: effectivePhoneNumber
           }
         };
 
@@ -415,15 +419,28 @@ class ProductionServer {
           user_message: message,
           bot_response: null,
           timestamp: Date.now(),
-          user_id: phone_number,
+          user_id: effectivePhoneNumber,
           customer_id: customer_id,
-          user_name: user_name || phone_number,
+          user_name: user_name || effectivePhoneNumber,
           metadata: metadata
         };
 
         // Process message and get result (isRealtime = true to increment unread)
         const result = this.processMessageFromDB(dbMessage, true);
         const { conversationId, addedUserMessage } = result;
+
+        // Update session phone_number if wa_id is now available (for sessions that were created with UUID)
+        if (wa_id) {
+          const conversation = this.conversations.get(conversationId);
+          if (conversation && conversation.sessions) {
+            const session = conversation.sessions.find(s => s.session_id === session_id);
+            if (session && session.phone_number !== wa_id) {
+              console.log(`📞 Updating session ${session_id} phone_number: ${session.phone_number} → ${wa_id}`);
+              session.phone_number = wa_id;
+              session.wa_id = wa_id;
+            }
+          }
+        }
 
         // Only broadcast if we actually added a new message (avoid duplicates)
         if (addedUserMessage) {
@@ -432,7 +449,7 @@ class ProductionServer {
           // Broadcast contact update
           this.broadcast({
             type: 'contact_update',
-            data: this.contacts.get(phone_number)
+            data: this.contacts.get(effectivePhoneNumber)
           });
 
           // Broadcast new message
